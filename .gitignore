@@ -1,0 +1,16 @@
+# --- Données personnelles : ne JAMAIS publier ---
+/profile.yaml
+/config.yaml
+/data/
+*.env
+.env*
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+
+# --- Divers ---
+.DS_Store
+Thumbs.db
+*.log
+tests/output/

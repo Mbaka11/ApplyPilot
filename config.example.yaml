@@ -1,0 +1,57 @@
+# Configuration d'ApplyPilot.
+# Copié automatiquement en config.yaml au premier démarrage (config.yaml n'est jamais publié sur git).
+
+server:
+  host: 127.0.0.1 # ne pas exposer sur le réseau
+  port: 4317
+
+# Dossier contenant tes CV en PDF. Pour chaque « X.pdf », ApplyPilot cherche aussi le
+# source LaTeX dans « X/main.tex » ou « X.tex » : l'IA lit ce texte pour rédiger la lettre.
+cvDir: ~/Documents/CV
+
+# (Optionnel) Description des variantes de CV.
+#  - language : fr / en (sinon deviné depuis le nom du fichier : _FR, _EN, (ENG)…)
+#  - default  : variante générale pour cette langue
+#  - tags     : mots-clés qui font recommander une variante spécialisée (≥ 2 occurrences dans l'offre)
+cvs:
+  - file: Mon_CV_FR.pdf
+    language: fr
+    label: CV FR (général)
+    default: true
+  - file: Mon_CV_EN.pdf
+    language: en
+    label: CV EN (général)
+    default: true
+  # - file: Mon_CV_FR_Finance.pdf
+  #   language: fr
+  #   label: CV FR – finance
+  #   tags: [quant, finance, trading, risque, portefeuille]
+  #   hidden: false
+
+# Lettres de référence (.txt / .md) dont l'IA imite le ton et la structure.
+styleDir: data/style
+
+llm:
+  command: pi # « pi » = installation standard ; sinon chemin complet
+  model: "" # vide = modèle par défaut de pi (ex. « sonnet », « opus »)
+  letterThinking: medium # off | minimal | low | medium | high | xhigh | max
+  answersThinking: low
+  timeoutSeconds: 300
+
+chrome:
+  executablePath: "" # vide = détection automatique (Chrome, puis Edge)
+
+letter:
+  paper: Letter # Letter ou A4
+  showHeader: true # en-tête avec nom + coordonnées
+  showDate: true
+  showRecipient: true
+  city: "" # vide = ville du profil
+  maxWords: 380
+  fileNameFr: "{first}_{last}_Lettre_de_motivation_{company}.pdf"
+  fileNameEn: "{first}_{last}_Cover_Letter_{company}.pdf"
+
+fill:
+  # Joint aussi la lettre dans le champ « CV » s'il accepte plusieurs fichiers
+  # et qu'il n'existe pas de champ dédié à la lettre.
+  attachLetterWithCv: true

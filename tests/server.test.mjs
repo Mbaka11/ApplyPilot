@@ -1,0 +1,198 @@
+// Test de bout en bout du serveur local (port et dossier de données isolés).
+//   node tests/server.test.mjs              → tests sans IA
+//   APPLYPILOT_TEST_LLM=1 node tests/...    → + vraie génération de lettre / réponses via pi
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PORT = 4399;
+const BASE = `http://127.0.0.1:${PORT}`;
+const DATA = path.join(ROOT, 'tests', 'output', 'data');
+const WITH_LLM = !!process.env.APPLYPILOT_TEST_LLM;
+const EXT_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+
+export const SAMPLE_JOB = {
+  url: 'https://nordique.wd3.myworkdayjobs.com/fr-CA/Carrieres/job/Montreal-QC/Stagiaire-en-apprentissage-automatique---Ete-2027_R-10432/apply',
+  jobKey: 'nordique.wd3.myworkdayjobs.com/stagiaire-en-apprentissage-automatique---ete-2027_r-10432',
+  platform: 'workday',
+  title: 'Stagiaire en apprentissage automatique – Été 2027',
+  company: 'Nordique Analytique',
+  location: 'Montréal, QC',
+  language: 'fr',
+  description: `Nordique Analytique aide les assureurs et les banques canadiennes à mieux évaluer le risque grâce aux données.
+Notre équipe Science des données recherche un ou une stagiaire pour l'été 2027 (16 semaines, temps plein, mode hybride à Montréal).
+
+Ce que vous ferez :
+- Concevoir et entraîner des modèles d'apprentissage automatique pour la tarification et la détection d'anomalies.
+- Industrialiser les modèles avec MLflow et Databricks, en collaboration avec l'équipe MLOps.
+- Explorer des approches d'apprentissage par renforcement pour l'optimisation de décisions séquentielles.
+- Présenter vos résultats aux équipes d'affaires.
+
+Ce que nous recherchons :
+- Étudiant(e) aux cycles supérieurs en informatique, génie logiciel, statistiques ou domaine connexe.
+- Maîtrise de Python et de PyTorch ou scikit-learn ; SQL.
+- Expérience en mise en production de modèles (atout).
+- Bilinguisme français-anglais.`,
+};
+
+// Lettre fictive (aucune donnée réelle) pour tester le rendu PDF.
+const SAMPLE_BODY = `Madame, Monsieur,
+
+Actuellement étudiante à la maîtrise en informatique, je souhaite poser ma candidature au poste de stagiaire en apprentissage automatique au sein de l’équipe Science des données de Nordique Analytique.
+
+Lors de mon dernier stage dans une compagnie d’assurance, j’ai conçu des modèles de tarification et automatisé leur validation par simulation. J’ai aussi développé des modèles de maintenance prédictive, avec un suivi rigoureux des expériences dans MLflow.
+
+Votre volonté d’industrialiser les modèles avec MLflow et Databricks rejoint directement mon expérience : j’aime transformer des prototypes en pipelines fiables et reproductibles.
+
+Je vous remercie de l’attention portée à ma candidature et serais ravie d’échanger avec vous lors d’un entretien.
+
+Veuillez agréer, Madame, Monsieur, mes salutations distinguées.`;
+
+let failures = 0;
+function check(name, cond, extra = '') {
+  console.log(`${cond ? '  ✓' : '  ✗'} ${name}${extra ? ` — ${extra}` : ''}`);
+  if (!cond) failures++;
+}
+
+async function api(method, p, body, headers = {}) {
+  const res = await fetch(BASE + p, {
+    method,
+    headers: { 'content-type': 'application/json', ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const type = res.headers.get('content-type') || '';
+  const data = type.includes('json') ? await res.json() : Buffer.from(await res.arrayBuffer());
+  return { status: res.status, headers: res.headers, data };
+}
+
+function pdfPages(buf) {
+  const m = buf.toString('latin1').match(/\/Type\s*\/Page(?![a-zA-Z])/g);
+  return m ? m.length : null;
+}
+
+async function main() {
+  fs.rmSync(DATA, { recursive: true, force: true });
+  const srv = spawn(process.execPath, ['server/src/index.js'], {
+    cwd: ROOT,
+    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let logs = '';
+  srv.stdout.on('data', (d) => (logs += d));
+  srv.stderr.on('data', (d) => (logs += d));
+
+  try {
+    let up = false;
+    for (let i = 0; i < 50 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      up = await fetch(`${BASE}/health`).then((r) => r.ok, () => false);
+    }
+    if (!up) throw new Error(`Le serveur ne démarre pas :\n${logs}`);
+
+    console.log('Serveur');
+    const h = await api('GET', '/health');
+    check('GET /health', h.status === 200 && h.data.ok, `pi=${h.data.pi} chrome=${!!h.data.chrome}`);
+
+    const evil = await api('GET', '/profile', undefined, { origin: 'https://evil.example.com' });
+    check('origine d’un site web refusée', evil.status === 403);
+    const ext = await api('GET', '/profile', undefined, { origin: EXT_ORIGIN });
+    check('origine extension acceptée + CORS', ext.status === 200 && ext.headers.get('access-control-allow-origin') === EXT_ORIGIN);
+    const rebinding = await new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port: PORT, path: '/health', headers: { host: 'evil.example.com' } }, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      });
+      req.on('error', () => resolve(0));
+      req.end();
+    });
+    check('en-tête Host étranger refusé', rebinding === 403);
+
+    const cvs = await api('GET', '/cvs');
+    check('GET /cvs', cvs.status === 200 && Array.isArray(cvs.data.cvs), `${cvs.data.cvs?.length} CV`);
+    const cvId = cvs.data.cvs?.[0]?.id;
+    if (cvId) {
+      const pdf = await api('GET', `/cvs/${encodeURIComponent(cvId)}/pdf?base64=1`);
+      check('CV en base64', pdf.status === 200 && pdf.data.base64?.length > 1000, pdf.data.name);
+    }
+
+    console.log('Candidature');
+    const created = await api('POST', '/applications', { job: SAMPLE_JOB });
+    const app = created.data.application;
+    check('création', created.status === 200 && !!app?.id, `${app?.id} · CV recommandé : ${created.data.recommendation?.cvId}`);
+    const again = await api('POST', '/applications', { job: SAMPLE_JOB });
+    check('dédoublonnage par offre', again.data.existed === true && again.data.application.id === app.id);
+
+    const put = await api('PUT', `/applications/${app.id}/letter`, {
+      language: 'fr',
+      subject: 'Candidature – Stagiaire en apprentissage automatique – Été 2027',
+      body: SAMPLE_BODY,
+      recipient: 'Équipe d’acquisition de talents',
+      company: 'Nordique Analytique',
+    });
+    check('rendu PDF de la lettre', put.status === 200 && !!put.data.letter?.fileName, put.data.letter?.fileName || put.data.error);
+    const pdfFile = path.join(DATA, 'applications', app.id, put.data.letter?.fileName || 'x');
+    const buf = fs.existsSync(pdfFile) ? fs.readFileSync(pdfFile) : Buffer.alloc(0);
+    check('fichier PDF valide', buf.subarray(0, 5).toString() === '%PDF-', `${buf.length} octets`);
+    const pages = pdfPages(buf);
+    check('lettre sur une page', pages === null || pages === 1, `pages=${pages ?? '?'} · police ${put.data.letter?.fit?.fontSizePt}pt`);
+    fs.copyFileSync(pdfFile, path.join(ROOT, 'tests', 'output', 'lettre-test.pdf'));
+
+    const b64 = await api('GET', `/applications/${app.id}/letter.pdf?base64=1`);
+    check('lettre en base64', b64.status === 200 && b64.data.base64?.length > 1000);
+
+    const patch = await api('PATCH', `/applications/${app.id}`, { status: 'soumise' });
+    check('statut « soumise »', patch.data.application?.status === 'soumise' && !!patch.data.application?.submittedAt);
+    const csv = await api('GET', '/journal.csv');
+    check('journal CSV', csv.status === 200 && csv.data.toString('utf8').includes('Nordique Analytique'));
+
+    const mem = await api('POST', '/memory', {
+      items: [{ label: 'How did you hear about us?*', value: 'LinkedIn', kind: 'prompt' }],
+      company: 'Nordique Analytique',
+    });
+    const memGet = await api('GET', '/memory');
+    check('mémoire des réponses', mem.data.added === 1 && !!memGet.data.items['how did you hear about us']);
+
+    if (WITH_LLM) {
+      console.log('IA (pi) — peut prendre 1 à 2 minutes');
+      const t0 = Date.now();
+      const gen = await api('POST', `/applications/${app.id}/letter`, { language: 'auto' });
+      const L = gen.data.letter;
+      check('lettre générée par pi', gen.status === 200 && L?.body?.length > 500, gen.data.error || `${Math.round((Date.now() - t0) / 1000)} s, ${L?.body?.split(/\s+/).length} mots, langue ${L?.language}`);
+      if (L) {
+        fs.writeFileSync(path.join(ROOT, 'tests', 'output', 'lettre-ia.txt'), `${L.subject}\n\n${L.body}\n\nAvertissements : ${L.warnings.join(' | ')}`, 'utf8');
+        const f = path.join(DATA, 'applications', app.id, L.fileName);
+        if (fs.existsSync(f)) fs.copyFileSync(f, path.join(ROOT, 'tests', 'output', 'lettre-ia.pdf'));
+        check('lettre IA sur une page', pdfPages(fs.readFileSync(f)) <= 1, `police ${L.fit?.fontSizePt}pt`);
+      }
+      const ans = await api('POST', '/answers', {
+        applicationId: app.id,
+        fields: [
+          { id: 'q1', label: 'Are you legally authorized to work in Canada?', kind: 'dropdown', required: true, options: ['Yes', 'No'] },
+          { id: 'q2', label: 'Why are you interested in this internship at Nordique Analytique?', kind: 'textarea', required: true },
+          { id: 'q3', label: 'Gender', kind: 'dropdown', options: ['Male', 'Female', 'Non-binary', 'I do not wish to answer'] },
+          { id: 'q4', label: 'Quel est votre niveau en anglais ?', kind: 'select', options: ['Débutant', 'Intermédiaire', 'Avancé', 'Bilingue'] },
+        ],
+      });
+      const A = ans.data.answers || {};
+      check('réponses IA', ans.status === 200 && Object.keys(A).length >= 3, ans.data.error || `${Math.round(ans.data.ms / 1000)} s`);
+      check('pas d’invention (autorisation de travail inconnue → null)', A.q1 && A.q1.value === null, JSON.stringify(A.q1));
+      check('déclaration volontaire → « ne souhaite pas répondre »', A.q3?.value === 'I do not wish to answer', JSON.stringify(A.q3?.value));
+      check('question ouverte rédigée', typeof A.q2?.value === 'string' && A.q2.value.length > 80);
+      fs.writeFileSync(path.join(ROOT, 'tests', 'output', 'reponses-ia.json'), JSON.stringify(A, null, 2), 'utf8');
+    } else {
+      console.log('(IA non testée — lance avec APPLYPILOT_TEST_LLM=1 pour tester pi)');
+    }
+  } finally {
+    srv.kill();
+  }
+  console.log(failures ? `\n${failures} échec(s)` : '\nTout est OK');
+  process.exit(failures ? 1 : 0);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workday — Application Questions</title>
+<style>
+  body { font: 14px sans-serif; padding: 20px; }
+  [data-automation-id^="formField"] { margin: 8px 0; }
+  label { display: block; font-weight: 600; }
+  .popup { position: absolute; top: 60px; left: 500px; background: #fff; border: 1px solid #999; padding: 4px; list-style: none; z-index: 9; }
+  .popup [role="option"] { padding: 3px 8px; }
+</style>
+<script src="mock.js"></script>
+</head>
+<body>
+<div data-automation-id="applyFlowPage">
+  <div data-automation-id="progressBarActiveStep">current step 3 of 5 Application Questions</div>
+  <h2>Application Questions</h2>
+  <div id="form"></div>
+  <button type="button" data-automation-id="bottom-navigation-next-button" id="next">Save and Continue</button>
+</div>
+<script>
+  const f = document.getElementById('form');
+  Mock.dropdownField(f, 'q1', 'Are you legally eligible to work in Canada?*', ['Yes', 'No']);
+  Mock.dropdownField(f, 'q2', 'Will you now or in the future require sponsorship for employment visa status?*', ['Yes', 'No']);
+  Mock.dropdownField(f, 'q3', 'Are you currently enrolled in a post-secondary program?*', ['Yes', 'No']);
+  Mock.dropdownField(f, 'q4', 'Which internship term are you applying for?*', ['Winter 2027', 'Summer 2027', 'Fall 2027']);
+  Mock.dropdownField(f, 'q5', 'Do you have a valid driver\'s license?*', ['Yes', 'No']);
+  Mock.field(f, { id: 'q6', label: 'Why are you interested in this role?*', html: '<textarea></textarea>' });
+  Mock.dateField(f, 'q7', 'What is your expected graduation date?*');
+  Mock.dropdownField(f, 'gender', 'Gender', ['Male', 'Female', 'Non-binary', 'I do not wish to answer']);
+  Mock.field(f, { id: 'agreementCheckbox', label: 'I have read and agree to the Terms and Conditions*', html: '<input type="checkbox" data-automation-id="agreementCheckbox">' });
+  f.querySelectorAll('textarea').forEach(Mock.controlled);
+</script>
+</body>
+</html>

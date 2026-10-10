@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apply — Nordique Analytique</title>
+<style>
+  body { font: 14px sans-serif; padding: 20px; max-width: 700px; }
+  .q { margin: 10px 0; }
+  label { font-weight: 600; }
+  #school-list { border: 1px solid #999; list-style: none; padding: 4px; margin: 0; }
+</style>
+</head>
+<body>
+<h1>Data Science Intern</h1>
+<form id="app" onsubmit="event.preventDefault(); window.submitted = true;">
+  <div class="q"><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></div>
+  <div class="q"><label for="last_name">Last Name *</label><input id="last_name" name="last_name" required></div>
+  <div class="q"><label for="email">Email *</label><input id="email" type="email" name="email" required></div>
+  <div class="q"><label for="phone">Phone</label><input id="phone" type="tel" name="phone"></div>
+  <div class="q"><label for="resume">Resume/CV *</label><input id="resume" type="file" name="resume" accept=".pdf"></div>
+  <div class="q"><label for="cover">Cover Letter</label><input id="cover" type="file" name="cover_letter" accept=".pdf"></div>
+  <div class="q"><label for="linkedin">LinkedIn Profile</label><input id="linkedin" name="urls[LinkedIn]"></div>
+  <div class="q"><label for="website">Website</label><input id="website" name="urls[Portfolio]"></div>
+  <div class="q"><label for="hear">How did you hear about this job?</label>
+    <select id="hear"><option value="">Please select</option><option>Indeed</option><option>LinkedIn</option><option>Company website</option><option>Referral</option></select></div>
+  <fieldset class="q"><legend>Are you legally authorized to work in Canada? *</legend>
+    <label><input type="radio" name="auth" value="1"> Yes</label>
+    <label><input type="radio" name="auth" value="0"> No</label>
+  </fieldset>
+  <div class="q"><label for="relatives">Do you have relatives working at Nordique Analytique?</label>
+    <select id="relatives"><option value="">--</option><option value="y">Yes</option><option value="n">No</option></select></div>
+  <div class="q"><label for="school">School</label>
+    <input id="school" role="combobox" aria-autocomplete="list" aria-controls="school-list" autocomplete="off">
+    <ul id="school-list" role="listbox" hidden></ul></div>
+  <div class="q"><label for="cl_text">Cover letter (paste)</label><textarea id="cl_text" rows="4"></textarea></div>
+  <div class="q"><label for="why">Why do you want to join Nordique Analytique?</label><textarea id="why" rows="3"></textarea></div>
+  <div class="q"><label for="gender">Gender</label>
+    <select id="gender"><option value="">Select...</option><option>Male</option><option>Female</option><option>Non-binary</option><option>Decline to self-identify</option></select></div>
+  <input name="website_confirm" id="hp" style="position:absolute; left:-9999px" tabindex="-1" autocomplete="off">
+  <div class="g-recaptcha"><textarea name="g-recaptcha-response" style="width:200px;height:40px"></textarea></div>
+  <div class="q"><label><input type="checkbox" id="privacy"> I agree to the privacy policy</label></div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+  const SCHOOLS = ['McGill University', 'Polytechnique Montréal', 'Université de Montréal', 'Université Laval'];
+  const input = document.getElementById('school');
+  const list = document.getElementById('school-list');
+  input.addEventListener('input', () => {
+    list.innerHTML = '';
+    const q = input.value.toLowerCase();
+    for (const s of SCHOOLS.filter((x) => q && x.toLowerCase().includes(q.slice(0, 6)))) {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.textContent = s;
+      li.addEventListener('click', () => { input.value = s; list.hidden = true; window.schoolPicked = s; });
+      list.appendChild(li);
+    }
+    list.hidden = !list.children.length;
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workday — My Information</title>
+<style>
+  body { font: 14px sans-serif; padding: 20px; }
+  [data-automation-id^="formField"] { margin: 10px 0; }
+  label { display: block; font-weight: 600; }
+  .popup { position: absolute; top: 60px; left: 400px; background: #fff; border: 1px solid #999; padding: 4px; list-style: none; z-index: 9; }
+  .popup [role="option"] { padding: 3px 8px; cursor: pointer; }
+</style>
+<script src="mock.js"></script>
+</head>
+<body>
+<header><nav><button aria-haspopup="listbox" data-automation-id="languagePicker">English</button></nav></header>
+<div data-automation-id="applyFlowPage">
+  <div data-automation-id="progressBar"><div data-automation-id="progressBarActiveStep">current step 1 of 5 My Information</div></div>
+  <h2>My Information</h2>
+  <div id="form"></div>
+</div>
+<script>
+  const form = document.getElementById('form');
+  Mock.promptField(form, 'source', 'How Did You Hear About Us?*', ['LinkedIn', 'Indeed', 'Company Website', 'Referral', 'Career Fair']);
+
+  const prev = Mock.field(form, { id: 'previousWorker', label: '', html: `
+    <fieldset><legend><label>Have you previously worked for Nordique Analytique?*</label></legend>
+      <div><input type="radio" id="pw-yes" name="candidateIsPreviousWorker" value="true"><label for="pw-yes">Yes</label></div>
+      <div><input type="radio" id="pw-no" name="candidateIsPreviousWorker" value="false"><label for="pw-no">No</label></div>
+    </fieldset>` });
+
+  // Le pays change le bloc adresse (comme Workday).
+  const addressBlock = document.createElement('div');
+  Mock.dropdownField(form, 'countryDropdown', 'Country*', ['Canada', 'France', 'United States of America'], (c) => renderAddress(c));
+  document.querySelector('[data-automation-id="countryDropdown"]').textContent = 'United States of America';
+  form.appendChild(addressBlock);
+
+  function renderAddress(country) {
+    addressBlock.innerHTML = '';
+    const names = Mock.field(addressBlock, { id: 'legalName--firstName', label: 'First Name*', html: '<input type="text" id="name--legalName--firstName" aria-required="true">' });
+    Mock.field(addressBlock, { id: 'legalName--lastName', label: 'Last Name*', html: '<input type="text" id="name--legalName--lastName" aria-required="true">' });
+    Mock.field(addressBlock, { id: 'preferredNameCheckbox', label: 'I have a preferred name', html: '<input type="checkbox" data-automation-id="preferredNameCheckbox">' });
+    Mock.field(addressBlock, { id: 'addressLine1', label: 'Address Line 1*', html: '<input type="text" data-automation-id="addressSection_addressLine1">' });
+    Mock.field(addressBlock, { id: 'city', label: 'City*', html: '<input type="text" data-automation-id="addressSection_city">' });
+    Mock.dropdownField(addressBlock, 'addressSection_countryRegion', country === 'Canada' ? 'Province or Territory*' : 'State*',
+      country === 'Canada' ? ['Alberta', 'British Columbia', 'Ontario', 'Quebec'] : ['California', 'New York']);
+    Mock.field(addressBlock, { id: 'postalCode', label: 'Postal Code*', html: '<input type="text" data-automation-id="addressSection_postalCode">' });
+    Mock.field(addressBlock, { id: 'email', label: 'Email Address*', html: '<input type="text" data-automation-id="email">' });
+    Mock.dropdownField(addressBlock, 'phone-device-type', 'Phone Device Type*', ['Landline', 'Mobile', 'Telecommunication Device for the Deaf']);
+    Mock.promptField(addressBlock, 'countryPhoneCode', 'Country Phone Code*', ['Canada (+1)', 'France (+33)', 'United States of America (+1)']);
+    Mock.field(addressBlock, { id: 'phoneNumber', label: 'Phone Number*', html: '<input type="text" data-automation-id="phone-number">' });
+    Mock.field(addressBlock, { id: 'phoneExtension', label: 'Phone Extension', html: '<input type="text" data-automation-id="phone-extension">' });
+    addressBlock.querySelectorAll('input[type="text"]').forEach(Mock.controlled);
+    window.addressRenderedFor = country;
+  }
+  renderAddress('United States of America');
+</script>
+</body>
+</html>

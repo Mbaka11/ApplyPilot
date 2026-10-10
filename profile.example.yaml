@@ -1,0 +1,129 @@
+# Profil ApplyPilot : tout ce que tu retapes à chaque candidature.
+# Copié en profile.yaml au premier démarrage. profile.yaml est PRIVÉ (jamais publié sur git).
+# Laisse une valeur vide ("") ou null si tu ne veux pas qu'elle soit remplie automatiquement.
+
+headline: Étudiant en génie logiciel — Data Science / ML
+summary: >-
+  Courte présentation (2-3 phrases) réutilisée par l'IA.
+
+identity:
+  firstName: Prénom
+  lastName: Nom
+  preferredName: ""
+  email: prenom.nom@example.com
+  phone: "514-555-0123"
+  phoneCountryCode: "+1"
+  phoneCountry: Canada
+  phoneType: Mobile
+  address:
+    line1: ""
+    line2: ""
+    city: Montréal
+    province: Québec
+    provinceCode: QC
+    postalCode: ""
+    country: Canada
+
+links:
+  linkedin: https://www.linkedin.com/in/ton-profil/
+  github: https://github.com/ton-compte
+  portfolio: ""
+
+# Réponses aux questions d'admissibilité (true / false / null = je réponds moi-même)
+workAuthorization:
+  citizenship: ""
+  canada:
+    authorizedToWork: null
+    needsSponsorship: null
+    status: "" # ex. Citoyen canadien, Résident permanent, Permis d'études + permis de travail coop
+  us:
+    authorizedToWork: null
+    needsSponsorship: null
+
+student:
+  currentlyEnrolled: true
+  program: Baccalauréat en génie logiciel (Polytechnique Montréal)
+  programEn: Bachelor of Software Engineering (Polytechnique Montréal)
+  level: Baccalauréat
+  expectedGraduation: "" # AAAA-MM
+  returningToSchoolAfterInternship: null
+
+availability:
+  term: "" # ex. Été 2027
+  termEn: "" # ex. Summer 2027
+  startDate: "" # AAAA-MM-JJ
+  endDate: ""
+  durationMonths: null
+  fullTime: true
+  willingToRelocate: null
+  workMode: "" # sur place / hybride / télétravail
+
+preferences:
+  howDidYouHear: LinkedIn
+  howDidYouHearAlternatives: [LinkedIn, Job Board, Company Website, Site carrière de l'entreprise, Internet, Social Media]
+  salaryExpectation: ""
+  referral: ""
+
+standardAnswers:
+  over18: true
+  relativesAtCompany: false
+  nonCompete: false
+  conflictOfInterest: false
+  willingToTravel: null
+
+# Déclarations volontaires (équité en emploi). « prefer not » = « Je ne souhaite pas répondre ».
+voluntaryDisclosures:
+  gender: prefer not
+  pronouns: prefer not
+  ethnicity: prefer not
+  visibleMinority: prefer not
+  indigenous: prefer not
+  disability: prefer not
+  veteran: prefer not
+  sexualOrientation: prefer not
+
+# Du plus récent au plus ancien (même ordre que dans Workday).
+education:
+  - school: Polytechnique Montréal
+    schoolSearch: [Polytechnique Montréal, École Polytechnique de Montréal]
+    degree: Baccalauréat en génie logiciel
+    degreeEn: Bachelor of Software Engineering
+    degreeLevel: [Bachelor's Degree, Baccalauréat, Bachelor]
+    fieldOfStudy: Software Engineering
+    fieldOfStudySearch: [Software Engineering, Génie logiciel, Computer Science]
+    start: 2022-09
+    end: 2026-05
+    current: true
+    gpa: ""
+    location: Montréal, Canada
+
+experience:
+  - title: Software Developer Intern
+    company: Entreprise
+    companyAliases: []
+    location: ""
+    start: 2025-05
+    end: 2025-08
+    current: false
+    description: Une phrase sur ce que tu as accompli.
+    technologies: [Python]
+
+projects:
+  - name: Projet perso
+    url: ""
+    description: ""
+
+skills: [Python, SQL, Git]
+
+languages:
+  - language: Français
+    languageEn: French
+    level: "" # natif / courant / avancé / intermédiaire / notions
+  - language: Anglais
+    languageEn: English
+    level: ""
+
+letter:
+  signatureName: Prénom Nom
+  tone: professionnel, direct et concret, sans clichés
+  extraInstructions: ""

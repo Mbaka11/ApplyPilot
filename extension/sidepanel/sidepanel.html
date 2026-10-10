@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ApplyPilot</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand"><img src="../icons/icon32.png" alt="" /><span>ApplyPilot</span></div>
+      <button id="serverStatus" class="status" data-action="recheck" title="Revérifier la connexion au serveur">…</button>
+    </header>
+
+    <nav class="tabs">
+      <button data-tab="app" class="active">Candidature</button>
+      <button data-tab="journal">Journal</button>
+      <button data-tab="profile">Profil</button>
+    </nav>
+
+    <main>
+      <section id="tab-app" class="tab active">
+        <div id="offline" class="card warn hidden"></div>
+        <div id="pageCard" class="card"></div>
+        <div id="appCard" class="card"></div>
+        <div id="letterCard" class="card"></div>
+        <div id="fillCard" class="card"></div>
+      </section>
+      <section id="tab-journal" class="tab"></section>
+      <section id="tab-profile" class="tab"></section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
