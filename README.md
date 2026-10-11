@@ -8,6 +8,7 @@
 - 🧠 **Questions ouvertes** : « Pourquoi nous ? » et les questions propres à chaque entreprise sont rédigées par l'IA, sans jamais inventer de faits.
 - 🗂️ **Journal des candidatures** : statut, date, CV et lettre envoyés, avec export CSV.
 - 🔁 **Mémoire** : tes réponses aux questions récurrentes sont retenues pour les candidatures suivantes.
+- ⚙️ **Profil modifiable dans le panneau** : coordonnées, adresse, disponibilités et admissibilité, avec sauvegardes privées et protection contre les modifications concurrentes.
 
 > ApplyPilot **ne clique jamais sur « Soumettre »**. Il remplit, surligne ce qu'il faut vérifier, et c'est toi qui envoies.
 
@@ -51,7 +52,8 @@ Prérequis :
    - Laisse la fenêtre ouverte pendant que tu postules.
 3. **Configure** :
    - `config.yaml` : `cvDir` = le dossier de tes CV. Pour chaque `X.pdf`, ApplyPilot lit aussi `X/main.tex` ou `X.tex`. Décris tes variantes dans `cvs` (langue, mots-clés).
-   - `profile.yaml` : toutes tes infos (coordonnées, études, expériences, réponses aux questions d'admissibilité…). Les modifications sont prises en compte immédiatement.
+   - Onglet **Profil** de l’extension : modifie tes coordonnées, adresse, disponibilités et réponses d’admissibilité, puis clique sur **Enregistrer le profil**. Le prochain remplissage utilise ces informations.
+   - `profile.yaml` reste accessible pour les expériences, formations détaillées et niveaux de langue. Les modifications manuelles sont prises en compte immédiatement.
    - Facultatif : place une ou deux de tes anciennes lettres en `.txt` dans `data/style/`, pour que l'IA imite ton style.
 4. **Installe l'extension** :
    - va dans `chrome://extensions` ;
@@ -63,10 +65,10 @@ Prérequis :
 
 1. **Ouvre l'offre** (sur Workday, LinkedIn → site de l'entreprise, etc.) puis clique sur **Analyser cette offre**. La candidature devient *active* et reste active pendant que tu passes d'une page à l'autre du formulaire. Le CV le plus adapté est présélectionné (★).
 2. **Génère la lettre**. Compte 20 à 60 s. Relis-la, corrige-la dans le panneau, puis clique sur **Mettre à jour le PDF**. Les avertissements listent ce que l'IA n'a pas pu confirmer (disponibilités, niveau de langue…).
-3. **Clique « Postuler » sur le site**, puis **Remplir cette page** à chaque étape :
+3. **Clique « Postuler / connexion » dans le panneau** (ou « Postuler » sur le site), puis **Remplir cette page** à chaque étape :
    - 🟩 **vert** : rempli depuis ton profil ;
    - 🟧 **orange** : à vérifier (réponses oui/non d'admissibilité, réponses de l'IA, cases de consentement à cocher toi-même) ;
-   - 🟥 **rouge** : à compléter (info absente du profil : le panneau indique la clé à ajouter dans `profile.yaml`).
+   - 🟥 **rouge** : à compléter (info absente du profil : renseigne-la dans l’onglet **Profil**, ou dans `profile.yaml` pour les champs détaillés).
 
    Clique sur un élément de la liste pour aller au champ concerné.
 4. **Vérifie, passe à l'étape suivante**, relance le remplissage, puis **soumets toi-même** et clique sur **J'ai soumis ✓**.
@@ -76,11 +78,21 @@ Prérequis :
 
 - **Autofill with Resume** : ApplyPilot joint ton CV, Workday le lit, puis ApplyPilot complète et corrige le reste.
 - **Apply Manually** : ApplyPilot ajoute lui-même tes blocs *Expérience* et *Formation* si les sections sont vides (option du panneau).
-- Un compte par entreprise reste nécessaire. ApplyPilot remplit le courriel, et le gestionnaire de mots de passe de Chrome s'occupe du reste.
+- Un compte par entreprise reste généralement nécessaire : un compte chez CAE ne donne pas accès au portail d’une autre entreprise.
+- **Postuler / connexion** ouvre le formulaire dans le navigateur où l’extension est installée. Une session Workday encore valide est réutilisée par Chrome. Un formulaire déjà ouvert est activé sans être rechargé, pour conserver tes saisies.
+- Sur une page de connexion, **Remplir cette page** renseigne le courriel uniquement. Laisse le gestionnaire de mots de passe de Chrome fournir le mot de passe, puis connecte-toi toi-même. Sessions expirées, CAPTCHA, double authentification et création de compte restent manuels. Aucun mot de passe n’est stocké par ApplyPilot.
 
 ### Mémoire des réponses
 
 Les questions que ton profil ne couvre pas, par exemple « Do you have a valid driver's license? », sont retenues quand tu cliques sur *Suivant* (ou *Mémoriser mes réponses*). Elles sont réutilisées automatiquement la fois suivante. Tu peux les gérer dans l'onglet **Profil**.
+
+### Éditer le profil
+
+L’onglet **Profil** enregistre uniquement les champs que tu as modifiés, dans `profile.yaml`. Avant chaque sauvegarde, une copie privée est conservée dans `data/backups/profile/`. Si le fichier a changé ailleurs, l’application refuse de l’écraser et conserve tes saisies : utilise **Recharger** pour repartir de la version du fichier.
+
+**Vide / « Je réponds moi-même »** laisse une information inconnue sans l’inventer. Modifier le profil ne modifie pas automatiquement les CV PDF ni les lettres déjà générées : garde les dates des études cohérentes et utilise **Mettre à jour le PDF** pour une lettre existante.
+
+<details><summary>Aperçu de l’éditeur (profil fictif)</summary><img src="docs/profil.png" width="360" alt="Éditeur de profil ApplyPilot"></details>
 
 ## Confidentialité et sécurité
 
@@ -111,6 +123,8 @@ Les questions que ton profil ne couvre pas, par exemple « Do you have a valid d
 |---|---|
 | « Serveur arrêté » dans le panneau | Lance `start.cmd`, puis clique sur le badge pour revérifier |
 | Rien ne se passe sur une page | Recharge la page (F5), surtout après une mise à jour de l'extension |
+| Pas de formulaire dans l’onglet Profil | Redémarre le serveur, puis recharge l’extension dans `chrome://extensions` |
+| Connexion Workday redemandée | Vérifie que tu utilises le bon profil Chrome et le bon portail entreprise ; la session peut avoir expiré |
 | « Impossible d'écrire … .pdf » | Ferme le PDF s'il est ouvert dans Acrobat ou un autre lecteur |
 | Erreur pi | Lance `pi` une fois dans un terminal pour vérifier la connexion (`/login`) |
 | Accents bizarres dans Excel | Le CSV utilise `;` et l'UTF-8 avec BOM. Ouvre-le avec *Données → À partir d'un fichier texte* si besoin |

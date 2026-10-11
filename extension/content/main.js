@@ -1,7 +1,7 @@
 // ApplyPilot — point d'entrée des scripts de contenu : commandes appelées par le panneau latéral.
 (() => {
   const AP = globalThis.ApplyPilot;
-  AP.VERSION = '0.1.0';
+  AP.VERSION = '0.2.0';
   AP.frameToken = AP.frameToken || Math.random().toString(36).slice(2, 6);
 
   const CHOICE = new Set(['select', 'radio', 'dropdown', 'prompt', 'combobox', 'checkboxes']);

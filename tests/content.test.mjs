@@ -106,6 +106,20 @@ async function main() {
     check('clé Lever : offre = /apply', keys[2] === keys[3], keys[2]);
     check('clé Greenhouse', keys[4] === keys[5], keys[4]);
 
+    console.log('Workday — Connexion');
+    await load(page, 'workday-login.html');
+    const loginDetect = await run(page, 'detect');
+    check('page de connexion reconnue', loginDetect.hasPassword === true);
+    await run(page, 'fill', PAYLOAD);
+    check('courriel de connexion rempli', (await val(page, '#login-email')) === PROFILE.identity.email);
+    check('mot de passe laissé vide', (await val(page, '#login-password')) === '');
+    await page.$eval('#login-password', (e) => { e.value = 'chrome-test-fixture'; });
+    await run(page, 'fill', PAYLOAD);
+    check('mot de passe fourni par Chrome non modifié', (await val(page, '#login-password')) === 'chrome-test-fixture');
+    const loginCapture = await run(page, 'capture');
+    check('mot de passe jamais mémorisé', !JSON.stringify(loginCapture.items).includes('chrome-test-fixture'));
+    check('connexion jamais envoyée', (await page.evaluate(() => window.loginAttempts)) === 0);
+
     console.log('Workday — Mes informations');
     await load(page, 'workday-myinfo.html');
     const r1 = await run(page, 'fill', PAYLOAD);

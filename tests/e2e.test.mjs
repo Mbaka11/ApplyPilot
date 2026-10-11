@@ -22,6 +22,13 @@ function check(name, cond, extra = '') {
   if (!cond) failures++;
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function replaceText(page, selector, text) {
+  await page.focus(selector);
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Control');
+  await page.type(selector, text);
+}
 
 function prepareData() {
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -108,7 +115,13 @@ async function main() {
     const site = await browser.newPage();
     await site.setViewport({ width: 1200, height: 900 });
     await site.goto(`${FIX_URL}/posting.html`);
-    check('scripts de contenu injectés automatiquement', await site.evaluate(() => typeof document.querySelector === 'function'));
+    await sleep(400);
+    const ping = await sw.evaluate(async (url) => {
+      const tab = (await chrome.tabs.query({})).find((t) => t.url?.startsWith(url));
+      const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => globalThis.__applyPilot?.run('ping', {}) });
+      return results[0]?.result;
+    }, FIX_URL);
+    check('scripts de contenu injectés dans le monde isolé', !!ping?.__ap && !!ping?.version);
 
     // Le panneau dans un onglet : « onglet actif » = la page de test.
     const panel = await browser.newPage();
@@ -132,6 +145,49 @@ async function main() {
     check('CV recommandé (offre en français → CV FR)', /FR/.test(cv), cv);
     check('section lettre affichée', (await panel.$eval('#letterCard', (e) => e.textContent)).includes('Générer la lettre'));
 
+    // Une installation fraîche reprend la seule candidature en cours, sans en créer une autre.
+    await sw.evaluate(() => chrome.storage.local.remove('activeAppId'));
+    await panel.reload();
+    await panel.waitForFunction(() => document.querySelector('#appCard h3')?.textContent.includes('Stagiaire'), { timeout: 10000 });
+    check('candidature en cours reprise sur une installation fraîche', true);
+    const tabsBefore = await sw.evaluate(() => chrome.tabs.query({}).then((tabs) => tabs.length));
+    await site.evaluate(() => { window.unsavedTrial = 'conserver'; });
+    await panel.click('[data-action="applyJob"]');
+    await sleep(250);
+    const tabsAfter = await sw.evaluate(() => chrome.tabs.query({}).then((tabs) => tabs.length));
+    check('bouton candidature : onglet existant activé sans doublon', tabsBefore === tabsAfter);
+    check('bouton candidature : saisie non rechargée', (await site.evaluate(() => window.unsavedTrial)) === 'conserver');
+    // Le panneau est un onglet dans le test : le réactiver après le changement d’onglet.
+    await panel.bringToFront();
+
+    // Éditeur de profil : sauvegarde réelle, rechargement, puis remplissage avec la nouvelle adresse.
+    await panel.click('[data-tab="profile"]');
+    await panel.waitForSelector('[data-profile-path="identity.address.line1"]');
+    await replaceText(panel, '[data-profile-path="identity.address.line1"]', '456 rue Démonstration');
+    await replaceText(panel, '[data-profile-path="identity.address.city"]', 'Québec');
+    await replaceText(panel, '[data-profile-path="identity.address.postalCode"]', 'g1a 1a1');
+    await panel.click('[data-action="saveProfile"]');
+    await panel.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Profil enregistré'), { timeout: 10000 });
+    const profileSaved = await fetch(`http://127.0.0.1:${API_PORT}/profile`).then((r) => r.json());
+    check('profil modifié depuis le panneau', profileSaved.profile.identity.address.line1 === '456 rue Démonstration' && profileSaved.profile.identity.address.postalCode === 'G1A 1A1');
+    check('autres coordonnées conservées', profileSaved.profile.identity.email === 'marie@example.com' && profileSaved.profile.workAuthorization.canada.needsSponsorship === false);
+    await replaceText(panel, '[data-profile-path="identity.address.line1"]', 'Brouillon non enregistré');
+    await fetch(`http://127.0.0.1:${API_PORT}/profile`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ revision: profileSaved.revision, values: { 'availability.workMode': 'Hybride' } }) });
+    await panel.click('[data-action="saveProfile"]');
+    await panel.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('modifié ailleurs'), { timeout: 10000 });
+    check('conflit : brouillon conservé dans le panneau', (await panel.$eval('[data-profile-path="identity.address.line1"]', (e) => e.value)) === 'Brouillon non enregistré');
+    panel.once('dialog', (dialog) => dialog.accept());
+    await panel.click('[data-action="reloadProfile"]');
+    await panel.waitForFunction(() => document.querySelector('[data-profile-path="identity.address.line1"]')?.value === '456 rue Démonstration');
+    check('rechargement explicite après conflit', true);
+    await panel.reload();
+    await panel.waitForFunction(() => document.querySelector('#serverStatus')?.classList.contains('on'));
+    await panel.click('[data-tab="profile"]');
+    await panel.waitForFunction(() => document.querySelector('[data-profile-path="identity.address.postalCode"]')?.value === 'G1A 1A1');
+    check('profil persistant après rechargement', true);
+    await panel.screenshot({ path: path.join(OUT, 'panel-profile-editor.png'), fullPage: true });
+    await panel.click('[data-tab="app"]');
+
     // Formulaire Workday sur la même offre → la candidature reste active.
     await site.goto(`${FIX_URL}/workday-myinfo.html`);
     await sleep(1500);
@@ -144,8 +200,18 @@ async function main() {
     const province = await site.$eval('[data-automation-id="addressSection_countryRegion"]', (e) => e.textContent.trim());
     const source = await site.$$eval('[data-automation-id="formField-source"] [data-automation-id="selectedItem"]', (els) => els.map((e) => e.textContent).join());
     check('page remplie depuis le panneau', first === 'Marie' && province === 'Quebec' && source === 'LinkedIn', `${first} / ${province} / ${source}`);
+    const address = await site.$$eval('[data-automation-id="addressSection_addressLine1"], [data-automation-id="addressSection_city"], [data-automation-id="addressSection_postalCode"]', (els) => els.map((e) => e.value));
+    check('nouvelle adresse remplie automatiquement', address.join('|') === '456 rue Démonstration|Québec|G1A 1A1', address.join(' / '));
     const todo = await panel.$$eval('#fillCard .results li.todo .lbl', (els) => els.map((e) => e.textContent));
     check('rien à compléter sur cette page (profil de test complet)', todo.length === 0, todo.join(', '));
+
+    await site.goto(`${FIX_URL}/workday-login.html`);
+    await sleep(1200);
+    await panel.click('[data-action="fill"]');
+    await panel.waitForFunction(() => !document.querySelector('#fillCard .busy') && !!document.querySelector('#fillCard .summary'), { timeout: 60000 });
+    check('connexion : courriel seul rempli depuis le panneau', (await site.$eval('#login-email', (e) => e.value)) === 'marie@example.com' && (await site.$eval('#login-password', (e) => e.value)) === '');
+    check('connexion non envoyée', (await site.evaluate(() => window.loginAttempts)) === 0);
+    check('consigne de connexion affichée', (await panel.$eval('#pageCard', (e) => e.textContent)).includes('double authentification'));
 
     // Fichiers : la page « expérience » reçoit le CV choisi.
     await site.goto(`${FIX_URL}/workday-experience.html`);

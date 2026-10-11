@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Workday — Sign In (test)</title>
+<style>body{font:16px system-ui;padding:40px}label,input{display:block;margin:10px 0}input{padding:8px;width:280px}</style></head>
+<body><main><h1 data-automation-id="applicationPageTitle">Sign In</h1>
+<form id="login" onsubmit="event.preventDefault();window.loginAttempts++">
+  <div data-automation-id="formField-email"><label for="login-email">Email Address</label><input id="login-email" data-automation-id="email" type="email" autocomplete="username" required></div>
+  <div data-automation-id="formField-password"><label for="login-password">Password</label><input id="login-password" data-automation-id="password" type="password" autocomplete="current-password" required></div>
+  <button data-automation-id="signInSubmitButton" type="submit">Sign In</button>
+</form>
+<a href="#create-account">Create Account</a>
+<script>window.loginAttempts=0;</script>
+</main></body></html>

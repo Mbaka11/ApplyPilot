@@ -1,4 +1,5 @@
 // ApplyPilot — panneau latéral : candidature active, lettre, remplissage, journal, profil.
+import { applicationUrl, existingApplicationTab } from './navigation.mjs';
 const CONTENT_FILES = [
   'content/dom.js',
   'content/extract.js',
@@ -52,6 +53,11 @@ const S = {
   fillPhase: '',
   fill: null,
   memory: null,
+  profile: null,
+  profileRevision: null,
+  profileFields: [],
+  profileDraft: {},
+  profileBusy: false,
   tab: 'app',
 };
 
@@ -86,7 +92,7 @@ async function api(path, { method = 'GET', body } = {}) {
     throw new Error('Serveur ApplyPilot injoignable : lance start.cmd');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Erreur ${res.status}`), { status: res.status });
   return data;
 }
 
@@ -408,7 +414,7 @@ function renderPage() {
       <button class="btn ghost" data-action="analyze">Analyser quand même</button></div>`;
   }
   el.innerHTML = `<h2><span>Page</span><span class="badge grey">${esc(PLATFORM_LABEL[p.platform] || p.platform)}</span></h2>${action}
-    ${p.hasPassword ? '<div class="small muted">🔒 Page de connexion : utilise le gestionnaire de mots de passe de Chrome.</div>' : ''}`;
+    ${p.hasPassword ? '<div class="small muted">🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.</div>' : ''}`;
 }
 
 function renderAppCard() {
@@ -432,6 +438,7 @@ function renderAppCard() {
     <div class="stack" style="margin-top:10px">
       <div><label class="field" for="cvSelect">CV à joindre ${rec?.cvId ? `<span class="muted">(★ recommandé : ${esc(rec.reason || '')})</span>` : ''}</label>
         <select id="cvSelect">${cvOptions || '<option value="">Aucun CV trouvé</option>'}</select></div>
+      ${a.job?.url && a.status !== 'soumise' ? '<button class="btn primary big" data-action="applyJob">Postuler / connexion</button><div class="small muted">Ouvre dans ce navigateur : une session Workday valide est réutilisée. Compte propre à chaque entreprise ; mots de passe gérés par Chrome.</div>' : ''}
       <div class="row">
         ${a.job?.url ? '<button class="btn ghost" data-action="openJob">Voir l’offre</button>' : ''}
         <span class="grow"></span>
@@ -569,25 +576,98 @@ function renderJournal() {
     ${S.apps.length ? `<ul class="list">${items}</ul>` : '<div class="muted">Aucune candidature pour l’instant.</div>'}</div>`;
 }
 
+function profileField(f) {
+  const saved = f.path.split('.').reduce((o, k) => o?.[k], S.profile);
+  const value = String((Object.hasOwn(S.profileDraft, f.path) ? S.profileDraft[f.path] : saved) ?? '');
+  const id = `profile-${f.path.replace(/\./g, '-')}`;
+  const attrs = `id="${esc(id)}" data-profile-path="${esc(f.path)}"`;
+  let input;
+  if (f.type === 'boolean') {
+    input = `<select ${attrs}>${[['', 'Je réponds moi-même'], ['true', 'Oui'], ['false', 'Non']].map(([v, label]) => `<option value="${v}" ${v === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
+  } else {
+    const type = f.type === 'integer' ? 'number' : f.type;
+    input = `<input ${attrs} type="${esc(type)}" value="${esc(value)}" maxlength="500"
+      ${f.autocomplete ? `autocomplete="${esc(f.autocomplete)}"` : 'autocomplete="off"'}
+      ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''}
+      ${f.type === 'integer' ? `min="${f.min}" max="${f.max}" step="1"` : ''}>`;
+  }
+  return `<div class="profile-field"><label class="field" for="${esc(id)}">${esc(f.label)}</label>${input}</div>`;
+}
+
+async function saveProfile() {
+  if (S.profileBusy || !$('#profileForm')?.reportValidity()) return;
+  const values = {};
+  for (const [key, raw] of Object.entries(S.profileDraft)) {
+    const f = S.profileFields.find((x) => x.path === key);
+    if (!f) throw new Error('Champ de profil inconnu.');
+    if (f.type === 'boolean') {
+      if (!['', 'true', 'false'].includes(raw)) throw new Error('Réponse oui/non invalide.');
+      values[key] = raw === '' ? null : raw === 'true';
+    } else if (f.type === 'integer') {
+      values[key] = raw === '' ? null : Number(raw);
+      if (raw !== '' && !Number.isInteger(values[key])) throw new Error('La durée doit être un nombre entier.');
+    } else values[key] = raw;
+  }
+  if (!Object.keys(values).length) return toast('Aucune modification à enregistrer.');
+  S.profileBusy = true;
+  try {
+    const saved = await api('/profile', { method: 'PUT', body: { revision: S.profileRevision, values } });
+    S.profile = saved.profile;
+    S.profileRevision = saved.revision;
+    S.profileFields = saved.fields;
+    S.profileDraft = {};
+    await checkServer();
+    await renderProfile();
+    toast('Profil enregistré ✓ — utilisé au prochain remplissage');
+  } finally {
+    S.profileBusy = false;
+  }
+}
+
+async function reloadProfile() {
+  if (Object.keys(S.profileDraft).length && !confirm('Recharger le profil et abandonner les modifications non enregistrées ?')) return;
+  S.profileDraft = {};
+  S.profileRevision = null;
+  await renderProfile();
+}
+
 async function renderProfile() {
   const el = $('#tab-profile');
   if (!S.health) {
     el.innerHTML = `<div class="card"><h2>Serveur</h2>${serverForm()}</div>`;
     return;
   }
+  let data;
   try {
-    S.memory = await api('/memory');
-  } catch {
-    S.memory = { items: {} };
+    [S.memory, data] = await Promise.all([api('/memory'), api('/profile')]);
+  } catch (err) {
+    el.innerHTML = `<div class="card"><h2>Profil</h2><div class="small" style="color:var(--bad)">${esc(err.message)}</div><button class="btn" data-action="reloadProfile">Réessayer</button></div>`;
+    return;
   }
-  const h = S.health;
+  const dirty = Object.keys(S.profileDraft).length > 0;
+  const conflict = dirty && S.profileRevision && S.profileRevision !== data.revision;
+  if (!dirty) {
+    S.profile = data.profile;
+    S.profileRevision = data.revision;
+    S.profileFields = data.fields || [];
+  }
+  const groups = [...new Set(S.profileFields.map((f) => f.group))];
+  const editor = S.profileFields.length ? `<form id="profileForm">
+    ${groups.map((group, i) => `<details class="profile-group" ${i < 2 ? 'open' : ''}><summary>${esc(group)}</summary>${S.profileFields.filter((f) => f.group === group).map(profileField).join('')}</details>`).join('')}
+    <div class="profile-save row"><button type="button" class="btn primary" data-action="saveProfile">Enregistrer le profil</button>
+      <button type="button" class="btn" data-action="reloadProfile">Recharger</button></div>
+    </form>` : '<div class="small" style="color:var(--warn)">Redémarre le serveur pour activer l’éditeur de profil.</div>';
+  const h = { ...S.health, warnings: data.warnings || S.health.warnings };
   const mem = Object.entries(S.memory.items || {}).sort((a, b) => String(b[1].lastUsedAt).localeCompare(String(a[1].lastUsedAt)));
   el.innerHTML = `
     <div class="card"><h2>Profil</h2>
       <div class="small">Fichier : <span class="kbd">${esc(h.profileFile)}</span></div>
       ${h.profileError ? `<div class="small" style="color:var(--bad)">${esc(h.profileError)}</div>` : ''}
-      ${h.warnings?.length ? `<div style="margin-top:8px"><b class="small">À compléter :</b><ul class="warnings">${h.warnings.map((w) => `<li>${esc(w.label)} <span class="muted">(${esc(w.path)})</span></li>`).join('')}</ul></div>` : '<div class="small" style="color:var(--ok);margin-top:6px">Profil complet ✓</div>'}
-      <div class="small muted" style="margin-top:6px">Modifie le fichier dans ton éditeur : les changements sont pris en compte immédiatement.</div>
+      ${h.warnings?.length ? `<div style="margin-top:8px"><b class="small">À compléter :</b><ul class="warnings">${h.warnings.map((w) => `<li>${esc(w.label)} <span class="muted">(${esc(w.path)})</span></li>`).join('')}</ul></div>` : '<div class="small" style="color:var(--ok);margin-top:6px">Champs essentiels renseignés ✓</div>'}
+      <div class="small muted" style="margin-top:6px">Enregistre ici tes coordonnées, disponibilités et réponses d’admissibilité. Vide / « Je réponds moi-même » = aucune réponse inventée. Sauvegarde privée automatique avant chaque modification.</div>
+      ${conflict ? '<div class="small" style="color:var(--warn)">Le fichier a changé ailleurs. Tes saisies sont conservées ; utilise « Recharger » avant de réessayer.</div>' : ''}
+      ${editor}
+      <div class="small muted">Les expériences et formations détaillées restent dans le YAML. Modifier le profil ne modifie pas les CV PDF ni les lettres déjà générées.</div>
     </div>
     <div class="card"><h2>CV (${S.cvs.length})</h2>
       <div class="small">Dossier : <span class="kbd">${esc(h.cvDir || 'non configuré')}</span></div>
@@ -633,6 +713,8 @@ const ACTIONS = {
     }
     renderApp();
   },
+  saveProfile: () => saveProfile(),
+  reloadProfile: () => reloadProfile(),
   analyze: () => analyze(),
   generate: () => generateLetter(),
   saveLetter: () => saveLetter(),
@@ -643,6 +725,18 @@ const ACTIONS = {
     toast('Texte copié ✓');
   },
   openJob: () => chrome.tabs.create({ url: S.app.job.url }),
+  applyJob: async () => {
+    if (!S.app?.job?.url) throw new Error('Choisis une candidature d’abord.');
+    const url = applicationUrl(S.app.job.url);
+    const u = new URL(url);
+    const tabs = await chrome.tabs.query({ url: `${u.protocol}//${u.hostname}/*` });
+    const existing = existingApplicationTab(S.app.job.url, tabs);
+    if (existing) {
+      await chrome.tabs.update(existing.id, { active: true });
+      await chrome.windows.update(existing.windowId, { focused: true });
+      toast('Formulaire déjà ouvert — saisies conservées');
+    } else await chrome.tabs.create({ url });
+  },
   newApp: () => setActiveApp(null),
   fill: () => fillPage(),
   memorize: () => captureMemory(),
@@ -695,7 +789,14 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'profileForm') return;
+  e.preventDefault();
+  saveProfile().catch((err) => toast(err.message, 'error'));
+});
+
 document.addEventListener('input', (e) => {
+  if (e.target.dataset.profilePath) S.profileDraft[e.target.dataset.profilePath] = e.target.value;
   if (e.target.id === 'letterSubject' || e.target.id === 'letterBody') {
     S.draft = S.draft || { subject: '', body: '' };
     S.draft[e.target.id === 'letterSubject' ? 'subject' : 'body'] = e.target.value;
@@ -709,6 +810,7 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', async (e) => {
   const t = e.target;
+  if (t.dataset.profilePath) S.profileDraft[t.dataset.profilePath] = t.value;
   try {
     if (t.id === 'cvSelect') {
       await patchApp({ cvId: t.value });
@@ -760,6 +862,10 @@ setInterval(() => {
   renderApp();
   await checkServer();
   if (S.health && stored.activeAppId) await setActiveApp(stored.activeAppId, { quiet: true }).catch(() => chrome.storage.local.remove('activeAppId'));
+  if (S.health && !S.app) {
+    const ongoing = S.apps.filter((a) => a.status === 'en cours');
+    if (ongoing.length === 1) await setActiveApp(ongoing[0].id, { quiet: true });
+  }
   renderApp();
   await refreshPage();
 })();

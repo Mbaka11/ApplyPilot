@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ApplyPilot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Remplit tes candidatures (Workday & co.) et rédige des lettres de motivation sur mesure. 100 % local, avec ton serveur ApplyPilot.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "storage", "scripting", "tabs", "clipboardWrite"],

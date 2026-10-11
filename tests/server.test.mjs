@@ -6,11 +6,15 @@ import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { applicationUrl, existingApplicationTab } from '../extension/sidepanel/navigation.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 4399;
 const BASE = `http://127.0.0.1:${PORT}`;
-const DATA = path.join(ROOT, 'tests', 'output', 'data');
+const OUT = path.join(ROOT, 'tests', 'output', 'server');
+const DATA = path.join(OUT, 'data');
+const TEST_PROFILE = path.join(OUT, 'profile.yaml');
+const TEST_CONFIG = path.join(OUT, 'config.yaml');
 const WITH_LLM = !!process.env.APPLYPILOT_TEST_LLM;
 const EXT_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 
@@ -73,11 +77,37 @@ function pdfPages(buf) {
   return m ? m.length : null;
 }
 
+function prepareFixtures() {
+  fs.rmSync(OUT, { recursive: true, force: true });
+  fs.mkdirSync(path.join(OUT, 'cvs'), { recursive: true });
+  // Pièce jointe factice : aucun CV réel n'est lu, même pour les tests IA.
+  fs.writeFileSync(path.join(OUT, 'cvs', 'Marie_Tremblay_CV_FR.pdf'), `%PDF-1.4\n${'% test fixture\n'.repeat(120)}%%EOF\n`);
+  fs.writeFileSync(path.join(OUT, 'cvs', 'Marie_Tremblay_CV_FR.tex'), '\\begin{document}\nMarie Tremblay — étudiante en informatique, Python, SQL, MLflow et Databricks. Expérience en modèles prédictifs chez Exemple Inc.\n\\end{document}\n');
+  fs.writeFileSync(TEST_CONFIG, `cvDir: ${JSON.stringify(path.join(OUT, 'cvs').replace(/\\/g, '/'))}\nstyleDir: ${JSON.stringify(path.join(OUT, 'style').replace(/\\/g, '/'))}\n`);
+  fs.writeFileSync(TEST_PROFILE, `# Profil fictif : commentaire à conserver.
+identity:
+  firstName: Marie
+  lastName: Tremblay
+  email: marie@example.com
+  phone: "514-555-0123"
+  address: { line1: "", city: Montréal, province: Québec, provinceCode: QC, postalCode: "", country: Canada }
+workAuthorization: { canada: { authorizedToWork: null, needsSponsorship: null } }
+student: { currentlyEnrolled: true, expectedGraduation: "2028-01" }
+availability: { term: Été 2027, termEn: Summer 2027, startDate: "2027-05-03", endDate: "2027-08-31" }
+voluntaryDisclosures: { gender: prefer not }
+education: [{ school: Université Exemple, degree: Maîtrise en informatique, start: "2026-01", end: "2028-01", current: true }]
+experience: [{ title: Stagiaire ML, company: Exemple Inc., start: "2025-05", end: "2025-08" }]
+skills: [Python, SQL, MLflow, Databricks]
+customKeepMe: { note: ne pas écraser }
+letter: { signatureName: Marie Tremblay }
+`);
+}
+
 async function main() {
-  fs.rmSync(DATA, { recursive: true, force: true });
+  prepareFixtures();
   const srv = spawn(process.execPath, ['server/src/index.js'], {
     cwd: ROOT,
-    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA },
+    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA, APPLYPILOT_PROFILE: TEST_PROFILE, APPLYPILOT_CONFIG: TEST_CONFIG, APPLYPILOT_CV_DIR: path.join(OUT, 'cvs') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';
@@ -109,6 +139,55 @@ async function main() {
       req.end();
     });
     check('en-tête Host étranger refusé', rebinding === 403);
+
+    console.log('Éditeur du profil (données fictives isolées)');
+    const firstProfile = await api('GET', '/profile');
+    check('schéma et révision fournis', firstProfile.data.fields?.some((f) => f.path === 'identity.address.line1') && /^[a-f0-9]{64}$/.test(firstProfile.data.revision));
+    const before = fs.readFileSync(TEST_PROFILE, 'utf8');
+    const savedProfile = await api('PUT', '/profile', { revision: firstProfile.data.revision, values: {
+      'identity.address.line1': '456 rue Démonstration', 'identity.address.city': 'Québec', 'identity.address.postalCode': 'g1a 1a1',
+      'workAuthorization.canada.needsSponsorship': false,
+    } }, { origin: EXT_ORIGIN });
+    check('adresse sauvegardée et normalisée', savedProfile.status === 200 && savedProfile.data.profile?.identity.address.postalCode === 'G1A 1A1');
+    check('false conservé, non interprété comme inconnu', savedProfile.data.profile?.workAuthorization.canada.needsSponsorship === false);
+    check('autres informations préservées', savedProfile.data.profile?.education?.[0].school === 'Université Exemple' && savedProfile.data.profile?.customKeepMe.note === 'ne pas écraser');
+    check('commentaires YAML préservés', fs.readFileSync(TEST_PROFILE, 'utf8').includes('# Profil fictif : commentaire à conserver.'));
+    const backups = path.join(DATA, 'backups', 'profile');
+    check('sauvegarde privée avant modification', fs.readdirSync(backups).some((f) => fs.readFileSync(path.join(backups, f), 'utf8') === before));
+    const revision = savedProfile.data.revision;
+    const snapshot = fs.readFileSync(TEST_PROFILE, 'utf8');
+    for (const [name, values] of [
+      ['champ inconnu / mot de passe refusé', { 'identity.password': 'do-not-store' }],
+      ['pollution de prototype refusée', { '__proto__.polluted': true }],
+      ['courriel invalide refusé', { 'identity.email': 'not-an-email' }],
+      ['booléen chaîne refusé', { 'availability.fullTime': 'false' }],
+      ['date impossible refusée', { 'availability.startDate': '2027-02-30' }],
+      ['fin avant début refusée', { 'availability.endDate': '2027-01-01' }],
+      ['URL javascript refusée', { 'links.portfolio': 'javascript:alert(1)' }],
+      ['durée invalide refusée', { 'availability.durationMonths': -1 }],
+    ]) {
+      const bad = await api('PUT', '/profile', { revision, values });
+      check(name, bad.status === 400 && fs.readFileSync(TEST_PROFILE, 'utf8') === snapshot);
+    }
+    const deniedWrite = await api('PUT', '/profile', { revision, values: { 'identity.firstName': 'Intrus' } }, { origin: 'https://evil.example.com' });
+    check('écriture depuis un site refusée', deniedWrite.status === 403 && fs.readFileSync(TEST_PROFILE, 'utf8') === snapshot);
+    fs.appendFileSync(TEST_PROFILE, '\n# Modification externe à ne pas écraser.\n');
+    const external = fs.readFileSync(TEST_PROFILE, 'utf8');
+    const stale = await api('PUT', '/profile', { revision, values: { 'identity.firstName': 'Ancienne saisie' } });
+    check('modification concurrente protégée (409)', stale.status === 409 && fs.readFileSync(TEST_PROFILE, 'utf8') === external);
+    check('pas de fichier temporaire résiduel', !fs.readdirSync(OUT).some((f) => f.endsWith('.tmp')));
+    check('pas de pollution de prototype', Object.prototype.polluted === undefined);
+
+    console.log('Navigation et session Workday');
+    const offer = 'https://example.wd3.myworkdayjobs.com/en-US/Careers/job/City/ML-Intern_R-123';
+    check('lien direct candidature Workday', applicationUrl(offer) === `${offer}/apply`);
+    check('pas de double /apply', applicationUrl(`${offer}/apply`) === `${offer}/apply`);
+    const draftTabs = [{ id: 3, url: `${offer}/apply/applyManually` }, { id: 4, url: 'https://another.wd3.myworkdayjobs.com/Careers/job/City/ML-Intern_R-123/apply' }];
+    check('formulaire existant retrouvé sans rechargement', existingApplicationTab(offer, draftTabs)?.id === 3);
+    check('offre ouverte n’est pas confondue avec un formulaire', !existingApplicationTab(offer, [{ id: 5, url: offer }]));
+    let refusedUrl = false;
+    try { applicationUrl('javascript:alert(1)'); } catch { refusedUrl = true; }
+    check('navigation dangereuse refusée', refusedUrl);
 
     const cvs = await api('GET', '/cvs');
     check('GET /cvs', cvs.status === 200 && Array.isArray(cvs.data.cvs), `${cvs.data.cvs?.length} CV`);

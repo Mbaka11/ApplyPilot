@@ -1,5 +1,6 @@
 # --- Données personnelles : ne JAMAIS publier ---
 /profile.yaml
+/profile.yaml.*.tmp
 /config.yaml
 /data/
 *.env

@@ -104,6 +104,10 @@ export function getProfile() {
   return fs.existsSync(PROFILE_FILE) ? readYaml(PROFILE_FILE) : {};
 }
 
+export function invalidateProfileCache() {
+  cache.delete(PROFILE_FILE);
+}
+
 const isBlank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
 /** Champs importants manquants dans le profil (affichés dans l'extension). */

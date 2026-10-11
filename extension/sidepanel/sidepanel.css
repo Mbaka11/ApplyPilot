@@ -246,6 +246,11 @@ label.field {
 
 input[type='text'],
 input[type='url'],
+input[type='email'],
+input[type='tel'],
+input[type='date'],
+input[type='month'],
+input[type='number'],
 select,
 textarea {
   width: 100%;
@@ -255,6 +260,28 @@ textarea {
   font: inherit;
   color: var(--text);
   background: #fff;
+}
+
+.profile-group {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+  margin-top: 10px;
+}
+
+.profile-group summary {
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.profile-field {
+  margin: 8px 0;
+}
+
+.profile-save {
+  background: var(--card);
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
 }
 
 textarea {

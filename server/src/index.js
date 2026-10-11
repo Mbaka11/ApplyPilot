@@ -14,6 +14,7 @@ import {
 } from './config.js';
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
 import { askJson, resolvePi } from './llm.js';
+import { editableProfile, updateProfile } from './profile.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
 import { closeBrowser, findChrome, htmlToPdf } from './pdf.js';
 import { buildAnswersPrompt, buildLetterPrompt } from './prompts.js';
@@ -230,10 +231,8 @@ route('GET', '/health', () => {
   };
 });
 
-route('GET', '/profile', () => {
-  const profile = getProfile();
-  return { profile, warnings: profileWarnings(profile), file: PROFILE_FILE };
-});
+route('GET', '/profile', () => editableProfile());
+route('PUT', '/profile', ({ body }) => updateProfile(body));
 
 route('GET', '/cvs', () => {
   const { cvs, error } = listCvs(getConfig());
@@ -438,7 +437,14 @@ route('GET', '/', ({ res }) => {
 <li>CV (${cvs.length}) : <code>${escapeHtml(cfg.cvDir || 'non configuré')}</code>${error ? ` — ⚠️ ${escapeHtml(error)}` : ''}</li>
 <li>Candidatures : ${apps.length} — <a href="/journal.csv">exporter le journal (CSV)</a></li>
 <li>pi : <code>${escapeHtml(resolvePi(cfg).desc)}</code></li>
-<li>Chrome (PDF) : <code>${escapeHtml(findChrome(cfg) || 'introuvable')}</code></li></ul></body></html>`;
+<li>Chrome (PDF) : <code>${escapeHtml(findChrome(cfg) || 'introuvable')}</code></li></ul>
+<h2>Installer ou recharger l’extension dans ton Chrome habituel</h2>
+<ol><li>Ouvre <code>chrome://extensions</code> dans Chrome et active le mode développeur.</li>
+<li>Clique sur <b>Charger l’extension non empaquetée</b> et choisis <code>${escapeHtml(path.join(ROOT, 'extension'))}</code>. Si elle est déjà installée, clique sur son bouton de rechargement.</li>
+<li>Dans le menu <b>Extensions (🧩)</b>, épingle <b>ApplyPilot</b>, puis clique sur son icône.</li>
+<li>L’onglet <b>Profil</b> permet de modifier et enregistrer ton adresse et tes autres informations, sans ouvrir le YAML.</li></ol>
+<p>Le bouton <b>Postuler / connexion</b> ouvre Workday dans ce navigateur et réutilise une session valide. Mots de passe gérés par Chrome ; CAPTCHA, double authentification et soumission restent manuels.</p>
+</body></html>`;
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
   return undefined;
