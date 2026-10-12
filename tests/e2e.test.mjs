@@ -143,6 +143,8 @@ async function main() {
     check('candidature créée et active', appText.includes('Nordique Analytique'), appText.replace(/\s+/g, ' ').slice(0, 90));
     const cv = await panel.$eval('#cvSelect', (e) => e.selectedOptions[0]?.textContent || '');
     check('CV recommandé (offre en français → CV FR)', /FR/.test(cv), cv);
+    const reqs = await panel.$eval('#appCard', (e) => e.querySelector('.reqs')?.textContent || '');
+    check('exigences de l’offre affichées (bilinguisme)', /À prévoir/.test(reqs) && /bilinguisme/i.test(reqs), reqs.replace(/\s+/g, ' ').slice(0, 120));
     check('section lettre affichée', (await panel.$eval('#letterCard', (e) => e.textContent)).includes('Générer la lettre'));
 
     // Une installation fraîche reprend la seule candidature en cours, sans en créer une autre.

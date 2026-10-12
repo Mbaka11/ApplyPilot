@@ -11,6 +11,21 @@ window.Mock = (() => {
     }, 20);
   }
 
+  /**
+   * Modèle de formulaire façon Workday : la valeur n'est enregistrée qu'à la sortie du champ
+   * (focusout). Une valeur seulement affichée reste « The field … is required ».
+   */
+  const model = {};
+  const required = new Set();
+  function committed(input, key, { mandatory = true } = {}) {
+    model[key] = input.value;
+    if (mandatory) required.add(key);
+    input.addEventListener('focusout', () => {
+      model[key] = input.value;
+    });
+  }
+  const missingRequired = () => [...required].filter((k) => !String(model[k] ?? '').trim());
+
   function closeAll() {
     document.querySelectorAll('.popup').forEach((p) => p.remove());
     document.querySelectorAll('[aria-expanded="true"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
@@ -47,12 +62,72 @@ window.Mock = (() => {
     });
   }
 
+  /**
+   * Liste Workday récente (Canvas Kit) : à l'ouverture, le focus passe à la liste (ul tabindex=-1) ;
+   * elle se ferme avec Échap reçu PAR la liste, ou quand elle perd le focus (focusout), puis rend le focus au bouton.
+   * Sans focus de fenêtre, Chrome n'émet aucun de ces événements : la liste restait ouverte.
+   */
+  let canvasN = 0;
+  function canvasSelect(btn, options, onChange) {
+    btn.type = 'button';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    if (!btn.textContent.trim()) btn.textContent = 'Sélectionnez une valeur';
+    let ul = null;
+    const close = () => {
+      if (!ul) return;
+      const u = ul;
+      ul = null;
+      u.remove();
+      btn.setAttribute('aria-expanded', 'false');
+      btn.removeAttribute('aria-controls');
+      btn.focus();
+    };
+    btn.addEventListener('click', () => {
+      if (ul) return; // comme en vrai : recliquer le bouton ne ferme pas la liste
+      ul = document.createElement('ul');
+      ul.id = `cks-${++canvasN}`;
+      ul.className = 'cks'; // hors de closeAll() : seule la liste elle-même peut se fermer
+      ul.setAttribute('role', 'listbox');
+      ul.tabIndex = -1;
+      for (const o of ['Sélectionnez une valeur', ...options]) {
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        li.textContent = o;
+        if (o !== 'Sélectionnez une valeur') {
+          li.addEventListener('click', () => {
+            btn.textContent = o;
+            close();
+            onChange?.(o);
+          });
+        }
+        ul.appendChild(li);
+      }
+      ul.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+      });
+      ul.addEventListener('focusout', () => setTimeout(close, 0));
+      document.body.appendChild(ul);
+      btn.setAttribute('aria-expanded', 'true');
+      btn.setAttribute('aria-controls', ul.id);
+      ul.focus();
+    });
+  }
+
   /** Champ « prompt » Workday : saisie + Entrée → options ; clic → pastille sélectionnée. */
   function prompt(container, options, { multi = false } = {}) {
     const input = container.querySelector('input');
     const list = container.querySelector('[data-automation-id="selectedItemList"]');
+    // Comme Workday : la recherche ne s'ouvre que si le champ est réellement actif (focus reçu).
+    let active = false;
+    input.addEventListener('focusin', () => {
+      active = true;
+    });
+    input.addEventListener('focusout', () => {
+      active = false;
+    });
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || e.keyCode !== 13) return; // Workday vérifie aussi keyCode
+      if (!active) return;
       e.preventDefault();
       closeAll();
       const q = input.value.toLowerCase();
@@ -65,6 +140,7 @@ window.Mock = (() => {
         div.setAttribute('data-automation-label', o);
         div.setAttribute('role', 'option');
         div.textContent = o;
+        div.addEventListener('mousedown', (ev) => ev.preventDefault()); // garde le focus dans la recherche
         div.addEventListener('click', () => {
           if (!multi) list.innerHTML = '';
           const li = document.createElement('li');
@@ -114,5 +190,5 @@ window.Mock = (() => {
     });
   }
 
-  return { controlled, dropdown, prompt, field, promptField, dropdownField, dateField, closeAll };
+  return { controlled, committed, missingRequired, model, dropdown, canvasSelect, prompt, field, promptField, dropdownField, dateField, closeAll };
 })();

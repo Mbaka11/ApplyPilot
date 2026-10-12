@@ -51,6 +51,13 @@
     Mock.field(addressBlock, { id: 'phoneNumber', label: 'Phone Number*', html: '<input type="text" data-automation-id="phone-number">' });
     Mock.field(addressBlock, { id: 'phoneExtension', label: 'Phone Extension', html: '<input type="text" data-automation-id="phone-extension">' });
     addressBlock.querySelectorAll('input[type="text"]').forEach(Mock.controlled);
+    // Champs enregistrés seulement à leur sortie, comme la validation Workday (« Errors Found »).
+    for (const [sel, key] of [
+      ['#name--legalName--firstName', 'firstName'], ['#name--legalName--lastName', 'lastName'],
+      ['[data-automation-id="addressSection_addressLine1"]', 'addressLine1'], ['[data-automation-id="addressSection_city"]', 'city'],
+      ['[data-automation-id="addressSection_postalCode"]', 'postalCode'], ['[data-automation-id="email"]', 'email'],
+      ['[data-automation-id="phone-number"]', 'phoneNumber'],
+    ]) Mock.committed(addressBlock.querySelector(sel), key);
     window.addressRenderedFor = country;
   }
   renderAddress('United States of America');

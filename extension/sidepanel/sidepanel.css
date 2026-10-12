@@ -515,3 +515,14 @@ details > summary {
 .legend .l-todo::before {
   border: 2px dotted var(--bad);
 }
+
+/* Exigences repérées dans l'offre */
+.reqs { margin: 8px 0 2px; border: 1px solid var(--line, #e5e7eb); border-radius: 8px; padding: 6px 8px; background: #fafafa; }
+.reqs summary { cursor: pointer; font-weight: 600; font-size: 12.5px; }
+.req-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.req { display: flex; gap: 6px; font-size: 12px; line-height: 1.35; }
+.req-icon { flex: 0 0 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; color: #fff; background: #94a3b8; margin-top: 1px; }
+.req.ok .req-icon { background: var(--ok, #16a34a); }
+.req.todo .req-icon { background: var(--bad, #dc2626); }
+.req.warn .req-icon { background: var(--warn, #d97706); }
+.req.info .req-icon { background: #64748b; }

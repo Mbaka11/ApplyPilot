@@ -47,6 +47,11 @@ student:
   level: Baccalauréat
   expectedGraduation: "" # AAAA-MM
   returningToSchoolAfterInternship: null
+  creditedInternship: null # true si ton programme crédite le stage (questions « stage crédité »)
+
+# Pièces jointes supplémentaires (chemins complets). Le relevé est joint aux champs « relevé de notes ».
+documents:
+  transcript: "" # ex. C:/Users/moi/Documents/releve_de_notes.pdf
 
 availability:
   term: "" # ex. Été 2027

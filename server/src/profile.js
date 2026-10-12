@@ -36,6 +36,8 @@ export const PROFILE_FIELDS = [
   field('Études — questions générales', 'student.currentlyEnrolled', 'Actuellement inscrit', 'boolean'),
   field('Études — questions générales', 'student.expectedGraduation', 'Fin des études prévue', 'month'),
   field('Études — questions générales', 'student.returningToSchoolAfterInternship', 'Retour aux études après le stage', 'boolean'),
+  field('Études — questions générales', 'student.creditedInternship', 'Stage crédité par ton programme', 'boolean'),
+  field('Documents', 'documents.transcript', 'Relevé de notes : chemin complet du PDF', 'path', { placeholder: 'C:\\Users\\…\\releve.pdf' }),
   field('Autorisation de travail — Canada', 'workAuthorization.citizenship', 'Citoyenneté'),
   field('Autorisation de travail — Canada', 'workAuthorization.canada.authorizedToWork', 'Autorisé à travailler au Canada', 'boolean'),
   field('Autorisation de travail — Canada', 'workAuthorization.canada.needsSponsorship', 'Besoin de parrainage au Canada', 'boolean'),
@@ -43,7 +45,17 @@ export const PROFILE_FIELDS = [
   field('Préférences', 'preferences.howDidYouHear', 'Comment nous avez-vous connus ?'),
   field('Préférences', 'preferences.salaryExpectation', 'Attentes salariales (facultatif)'),
 ];
-const FIELDS = new Map(PROFILE_FIELDS.map((f) => [f.path, f]));
+const LEVEL_HINT = 'natif / courant / avancé / intermédiaire / notions';
+
+/** Un champ « niveau » par langue du profil (les langues elles-mêmes restent dans le YAML). */
+function languageFields(profile) {
+  return (Array.isArray(profile?.languages) ? profile.languages : [])
+    .slice(0, 12)
+    .map((l, i) => field('Langues', `languages.${i}.level`, `Niveau — ${l?.language || l?.languageEn || `langue ${i + 1}`}`, 'text', { placeholder: LEVEL_HINT }));
+}
+
+const fieldsFor = (profile) => [...PROFILE_FIELDS, ...languageFields(profile)];
+const pathKeys = (key) => key.split('.').map((k) => (/^\d+$/.test(k) ? Number(k) : k));
 const revisionOf = (raw) => crypto.createHash('sha256').update(raw).digest('hex');
 const error = (status, message) => Object.assign(new Error(message), { status });
 
@@ -58,7 +70,7 @@ function readDocument() {
 
 export function editableProfile() {
   const { profile, revision } = readDocument();
-  return { profile, revision, fields: PROFILE_FIELDS, warnings: profileWarnings(profile), file: PROFILE_FILE };
+  return { profile, revision, fields: fieldsFor(profile), warnings: profileWarnings(profile), file: PROFILE_FILE };
 }
 
 function validate(f, value) {
@@ -84,6 +96,18 @@ function validate(f, value) {
     if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) throw error(400, `${f.label} : utilise une URL HTTP(S) sans identifiants.`);
   }
   if (f.type === 'month' && !/^\d{4}-(0[1-9]|1[0-2])$/.test(s)) throw error(400, `${f.label} : format AAAA-MM attendu.`);
+  if (f.type === 'path') {
+    s = s.replace(/^"(.*)"$/, '$1'); // chemin collé depuis l'Explorateur (« Copier en tant que chemin »)
+    if (!path.isAbsolute(s) || !/\.pdf$/i.test(s)) throw error(400, `${f.label} : chemin complet d'un fichier PDF attendu.`);
+    let st;
+    try {
+      st = fs.statSync(s);
+    } catch {
+      throw error(400, `${f.label} : fichier introuvable (${s}).`);
+    }
+    if (!st.isFile() || st.size > 10 * 1024 * 1024) throw error(400, `${f.label} : fichier PDF de 10 Mo maximum attendu.`);
+  }
+  if (f.path.startsWith('languages.') && s.length > 60) throw error(400, `${f.label} : 60 caractères maximum.`);
   if (f.type === 'date' && (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(s) || new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) !== s)) {
     throw error(400, `${f.label} : date valide au format AAAA-MM-JJ attendue.`);
   }
@@ -94,15 +118,16 @@ function validate(f, value) {
 export function updateProfile({ revision, values } = {}) {
   if (typeof revision !== 'string' || !/^[a-f0-9]{64}$/.test(revision)) throw error(400, 'Révision du profil manquante : recharge le profil.');
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw error(400, 'Les champs du profil doivent être un objet.');
+  const current = readDocument();
+  const fields = new Map(fieldsFor(current.profile).map((f) => [f.path, f]));
   const changes = Object.entries(values).map(([key, value]) => {
-    const f = FIELDS.get(key);
+    const f = fields.get(key);
     if (!f) throw error(400, `Champ non modifiable : ${key}`);
     return [key, validate(f, value)];
   });
-  const current = readDocument();
   if (revision !== current.revision) throw error(409, 'Le profil a été modifié ailleurs. Tes saisies sont conservées : recharge le profil avant de réessayer.');
   if (!changes.length) return { ...editableProfile(), updated: 0 };
-  for (const [key, value] of changes) current.doc.setIn(key.split('.'), value);
+  for (const [key, value] of changes) current.doc.setIn(pathKeys(key), value);
   const next = current.doc.toJS();
   if (next.availability?.startDate && next.availability?.endDate && String(next.availability.endDate) < String(next.availability.startDate)) {
     throw error(400, 'La date de fin du stage ne peut pas précéder la date de début.');

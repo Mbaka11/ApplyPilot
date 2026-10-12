@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Workday — Mon expérience (langues, sites Web)</title>
+<style>
+  body { font: 14px sans-serif; padding: 20px; }
+  [data-automation-id^="formField"] { margin: 8px 0; }
+  label { display: block; font-weight: 600; }
+  [role="group"] { border: 1px solid #ddd; padding: 8px; margin: 8px 0; }
+  .cks, .popup { position: absolute; top: 60px; left: 520px; background: #fff; border: 1px solid #999; padding: 4px; list-style: none; z-index: 9; }
+  [role="option"] { padding: 3px 8px; }
+</style>
+<script src="mock.js"></script>
+</head>
+<body>
+<!-- Reproduit la page « Mon expérience » de GIRO (Workday, interface française, oct. 2026). -->
+<div data-automation-id="applyFlowPage">
+  <div data-automation-id="progressBarActiveStep">current step 2 of 5 Mon expérience</div>
+  <h2>Mon expérience</h2>
+
+  <div role="group" aria-labelledby="Langues-section" id="langSection">
+    <h4 id="Langues-section">Langues</h4>
+    <div class="entries"></div>
+    <button data-automation-id="add-button" id="addLang">Ajouter un autre</button>
+  </div>
+
+  <div role="group" aria-labelledby="Sites-Web-section" id="webSection">
+    <h4 id="Sites-Web-section">Sites Web</h4>
+    <div>Ajoutez des sites Web pertinents.</div>
+    <div class="entries"></div>
+    <button data-automation-id="add-button" id="addWeb">Ajouter</button>
+  </div>
+
+  <div data-automation-id="websiteSection">
+    <h4>Adresses URL de réseaux sociaux</h4>
+    <div data-automation-id="formField-linkedInAccount"><label for="socialNetworkAccounts--linkedInAccount">LinkedIn</label><input type="text" id="socialNetworkAccounts--linkedInAccount"></div>
+  </div>
+
+  <div id="questions">
+    <h4>Questions</h4>
+  </div>
+</div>
+<script>
+  // Niveaux Workday : espace insécable après le chiffre, comme sur la vraie page.
+  const LEVELS = ['1\u00a0- Aucune connaissance', '2\u00a0- Débutant', '3\u00a0- Intermédiaire', '4\u00a0- Avancé', '5\u00a0- Maîtrise parfaite'];
+  const LANGS = ['Allemand', 'Anglais', 'Espagnol', 'Français', 'Russe'];
+  let ln = 0;
+  function addLanguage() {
+    ln++;
+    const g = document.createElement('div');
+    g.setAttribute('role', 'group');
+    g.setAttribute('aria-labelledby', `Langues-${ln}-panel`);
+    g.innerHTML = `<h5 id="Langues-${ln}-panel">Langues ${ln}</h5>`;
+    document.querySelector('#langSection .entries').appendChild(g);
+    const id = `language-${160 + ln}`;
+    Mock.field(g, { id: 'language', label: 'Langue*', html: `<button name="language" id="${id}--language"></button>` });
+    // Même name="native" dans chaque bloc : ce ne sont PAS des cases d'une même question.
+    Mock.field(g, { id: 'native', label: '', html: `<input type="checkbox" name="native" id="${id}--native"><label for="${id}--native">Je parle couramment cette langue.</label>` });
+    for (const [k, lab] of [['r', 'Compréhension'], ['w', 'Écrit'], ['s', 'Parlé']]) {
+      Mock.field(g, { id: `2f49${k}`, label: `${lab}*`, html: `<button name="2f49${k}" id="${id}--2f49${k}"></button>` });
+    }
+    Mock.canvasSelect(g.querySelector('button[name="language"]'), LANGS);
+    g.querySelectorAll('button[name^="2f49"]').forEach((b) => Mock.canvasSelect(b, LEVELS));
+  }
+  addLanguage(); // Workday affiche un premier bloc vide
+  document.getElementById('addLang').addEventListener('click', addLanguage);
+
+  let wn = 0;
+  document.getElementById('addWeb').addEventListener('click', () => {
+    wn++;
+    const g = document.createElement('div');
+    g.setAttribute('role', 'group');
+    g.setAttribute('aria-labelledby', `Sites-Web-${wn}-panel`);
+    g.innerHTML = `<h5 id="Sites-Web-${wn}-panel">Sites Web ${wn}</h5><button type="button">Supprimer</button>`;
+    document.querySelector('#webSection .entries').appendChild(g);
+    // L'identifiant contient « webAddress-15 » : ne doit pas passer pour « address 1 ».
+    Mock.field(g, { id: 'url', label: 'Adresse URL*', html: `<input type="text" id="webAddress-${14 + wn}--url" name="url" aria-required="true">` });
+    g.querySelectorAll('input').forEach(Mock.controlled);
+  });
+
+  const q = document.getElementById('questions');
+  Mock.field(q, { id: 'q-grad', label: 'Quelle est la date de votre graduation (mois et année) ?*', html: '<input type="text" id="primaryQuestionnaire--grad">' });
+  // Questions réelles de GIRO (hiver 2027).
+  Mock.field(q, { id: 'q-credit', label: "Recherchez-vous un stage crédité dans le cadre de votre programme d'études ?*", html: '<button id="primaryQuestionnaire--credit"></button>' });
+  Mock.canvasSelect(q.querySelector('#primaryQuestionnaire--credit'), ['Oui', 'Non']);
+  Mock.field(q, { id: 'q-transcript', label: 'Veuillez S.V.P. attacher votre relevé de notes le plus récent.*', html: '<input type="file" id="primaryQuestionnaire--transcript"><ul id="transcriptFiles"></ul>' });
+  q.querySelector('#primaryQuestionnaire--transcript').addEventListener('change', (e) => {
+    for (const f of e.target.files) document.getElementById('transcriptFiles').insertAdjacentHTML('beforeend', `<li>${f.name}</li>`);
+  });
+  // Liste impossible à résoudre par le profil : sondée pour l'IA, elle doit se refermer.
+  Mock.field(q, { id: 'q-cote', label: 'Cote de sécurité détenue*', html: '<button id="primaryQuestionnaire--cote"></button>' });
+  Mock.canvasSelect(q.querySelector('#primaryQuestionnaire--cote'), ['Aucune', 'Fiabilité', 'Secret']);
+  document.querySelectorAll('input[type="text"]').forEach((i) => i.id.startsWith('webAddress') || Mock.controlled(i));
+</script>
+</body>
+</html>

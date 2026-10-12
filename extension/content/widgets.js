@@ -28,6 +28,9 @@
     if (/mm\s*\/\s*(yyyy|aaaa)/.test(hint)) return `${pad(p.month || 1)}/${p.year}`;
     if (/(dd|jj)\s*\/\s*mm\s*\/\s*(yyyy|aaaa)/.test(hint)) return `${pad(day)}/${pad(p.month || 1)}/${p.year}`;
     if (/mm\s*\/\s*(dd|jj)\s*\/\s*(yyyy|aaaa)/.test(hint)) return `${pad(p.month || 1)}/${pad(day)}/${p.year}`;
+    // "Date de graduation (mois et année)" / "month and year" : MM/AAAA, pas seulement l'année.
+    const lab = AP.norm(`${d.label} ${d.placeholder}`);
+    if (p.month && /\b(mois|month)\b/.test(lab) && /\b(annee|year)\b/.test(lab)) return `${pad(p.month)}/${p.year}`;
     if (/^(yyyy|aaaa)$/.test(hint.trim()) || /\byear\b|\bannee\b/.test(AP.norm(d.label))) return String(p.year);
     return p.month ? `${p.year}-${pad(p.month)}${p.day ? `-${pad(p.day)}` : ''}` : String(p.year);
   }
@@ -85,7 +88,7 @@
       input.dispatchEvent(new Event('change', { bubbles: true }));
       await AP.sleep(60);
     }
-    (year || month)?.blur?.();
+    AP.blur(year || month);
     await AP.sleep(80);
     const ok = (!year || year.value.includes(String(p.year))) && (!month || !p.month || Number(month.value) === p.month);
     return { status: ok ? 'ok' : 'check', value: [p.month && pad(p.month), p.year].filter(Boolean).join('/') };
@@ -114,7 +117,7 @@
     AP.setNativeValue(el, option.value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.blur?.();
+    AP.blur(el);
     return { status: el.value === option.value ? 'ok' : 'check', value: option.text.trim() };
   }
 
@@ -197,10 +200,18 @@
     return list;
   }
 
+  const isOpen = (btn) => btn.getAttribute('aria-expanded') === 'true' || !!controlled(btn);
+
   async function closeListbox(btn) {
-    await AP.press(document.activeElement && document.activeElement !== document.body ? document.activeElement : btn, 'Escape');
+    const list = controlled(btn);
+    await AP.press(AP.focusedElement() || list || btn, 'Escape');
     await AP.sleep(120);
-    if (btn.getAttribute('aria-expanded') === 'true') {
+    if (isOpen(btn) && list?.isConnected) {
+      // Liste Workday (Canvas Kit) : Escape doit viser la liste elle-même.
+      await AP.press(list, 'Escape');
+      await AP.sleep(120);
+    }
+    if (isOpen(btn)) {
       AP.click(btn);
       await AP.sleep(120);
     }

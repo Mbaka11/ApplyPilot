@@ -30,6 +30,10 @@
     <button type="button" data-automation-id="Add" id="addEdu">Add</button>
   </div>
 
+  <div data-automation-id="skillsSection" id="skillsSection">
+    <h3>Skills</h3>
+  </div>
+
   <div data-automation-id="resumeSection">
     <h3>Resume/CV</h3>
     <input type="file" multiple data-automation-id="file-upload-input-ref" style="opacity:0;position:absolute;width:1px;height:1px">
@@ -77,6 +81,10 @@
     Mock.dateField(g, 'lastYearAttended', 'To (Actual or Expected)', { month: false });
     g.querySelectorAll('input[type="text"]:not([data-uxi-widget-type])').forEach(Mock.controlled);
   });
+
+  // Compétences : recherche multi-sélection (« Type to Add Skills »), libellés Workday plus longs que le profil.
+  Mock.promptField(document.getElementById('skillsSection'), 'skills', 'Type to Add Skills',
+    ['Python (Programming Language)', 'PyTorch (Machine Learning Library)', 'SQL (Programming Language)', 'NoSQL', 'Java', 'JavaScript'], { multi: true });
 
   const file = document.querySelector('[data-automation-id="file-upload-input-ref"]');
   file.addEventListener('change', () => {

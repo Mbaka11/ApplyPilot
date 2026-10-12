@@ -9,6 +9,9 @@
 - 🗂️ **Journal des candidatures** : statut, date, CV et lettre envoyés, avec export CSV.
 - 🔁 **Mémoire** : tes réponses aux questions récurrentes sont retenues pour les candidatures suivantes.
 - ⚙️ **Profil modifiable dans le panneau** : coordonnées, adresse, disponibilités et admissibilité, avec sauvegardes privées et protection contre les modifications concurrentes.
+- 🔎 **Exigences de l’offre repérées dès l’analyse** : relevé de notes, stage crédité, GPA minimum, bilinguisme, présentiel, vérifications, rémunération, date limite. Chacune est comparée à ton profil (✓ prêt, ! à compléter).
+- 🌐 **Langues et sites Web** : blocs Workday « Langues » (niveaux, « je parle couramment ») et « Sites Web » (GitHub, portfolio) ajoutés et remplis depuis ton profil.
+- 📑 **Relevé de notes** : indique son chemin une fois dans **Profil → Documents**, il est joint aux champs « relevé de notes ».
 
 > ApplyPilot **ne clique jamais sur « Soumettre »**. Il remplit, surligne ce qu'il faut vérifier, et c'est toi qui envoies.
 
@@ -82,6 +85,12 @@ Prérequis :
 - **Postuler / connexion** ouvre le formulaire dans le navigateur où l’extension est installée. Une session Workday encore valide est réutilisée par Chrome. Un formulaire déjà ouvert est activé sans être rechargé, pour conserver tes saisies.
 - Sur une page de connexion, **Remplir cette page** renseigne le courriel uniquement. Laisse le gestionnaire de mots de passe de Chrome fournir le mot de passe, puis connecte-toi toi-même. Sessions expirées, CAPTCHA, double authentification et création de compte restent manuels. Aucun mot de passe n’est stocké par ApplyPilot.
 
+### Pourquoi la 0.3.0 remplit mieux Workday
+
+Quand tu cliques dans le panneau latéral, la page n’a plus le focus clavier. Chrome met alors bien à jour les valeurs, mais n’émet **aucun** événement `focus` ou `blur`. Or Workday n’enregistre un champ qu’à sa sortie : il affichait la valeur, puis répondait « The field … is required ».
+
+ApplyPilot émule désormais ces événements, y compris quand Workday déplace le focus lui-même, par exemple vers une liste ouverte. Les tests rejouent ce cas avec une page en arrière-plan.
+
 ### Mémoire des réponses
 
 Les questions que ton profil ne couvre pas, par exemple « Do you have a valid driver's license? », sont retenues quand tu cliques sur *Suivant* (ou *Mémoriser mes réponses*). Elles sont réutilisées automatiquement la fois suivante. Tu peux les gérer dans l'onglet **Profil**.
@@ -89,6 +98,8 @@ Les questions que ton profil ne couvre pas, par exemple « Do you have a valid d
 ### Éditer le profil
 
 L’onglet **Profil** enregistre uniquement les champs que tu as modifiés, dans `profile.yaml`. Avant chaque sauvegarde, une copie privée est conservée dans `data/backups/profile/`. Si le fichier a changé ailleurs, l’application refuse de l’écraser et conserve tes saisies : utilise **Recharger** pour repartir de la version du fichier.
+
+L’éditeur couvre aussi le **stage crédité**, les **niveaux de langue** (natif, courant, avancé, intermédiaire, notions) et le **chemin du relevé de notes**. Pour ce dernier, tu peux coller le chemin obtenu avec « Copier en tant que chemin » dans l’Explorateur Windows.
 
 **Vide / « Je réponds moi-même »** laisse une information inconnue sans l’inventer. Modifier le profil ne modifie pas automatiquement les CV PDF ni les lettres déjà générées : garde les dates des études cohérentes et utilise **Mettre à jour le PDF** pour une lettre existante.
 
@@ -123,6 +134,8 @@ L’onglet **Profil** enregistre uniquement les champs que tu as modifiés, dans
 |---|---|
 | « Serveur arrêté » dans le panneau | Lance `start.cmd`, puis clique sur le badge pour revérifier |
 | Rien ne se passe sur une page | Recharge la page (F5), surtout après une mise à jour de l'extension |
+| Workday : « The field City is required » alors que la valeur est affichée | Corrigé en 0.3.0. Recharge l’extension dans `chrome://extensions`, puis relance **Remplir cette page** |
+| Workday : compétences ou « How did you hear about us? » non ajoutées | Même cause, corrigée en 0.3.0 : le panneau gardait le focus, et Workday n’enregistrait pas les saisies |
 | Pas de formulaire dans l’onglet Profil | Redémarre le serveur, puis recharge l’extension dans `chrome://extensions` |
 | Connexion Workday redemandée | Vérifie que tu utilises le bon profil Chrome et le bon portail entreprise ; la session peut avoir expiré |
 | « Impossible d'écrire … .pdf » | Ferme le PDF s'il est ouvert dans Acrobat ou un autre lecteur |

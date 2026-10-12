@@ -1,6 +1,6 @@
 {
   "name": "applypilot-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Serveur local d'ApplyPilot : profil, CV, lettres de motivation (via pi) et journal des candidatures.",
   "type": "module",

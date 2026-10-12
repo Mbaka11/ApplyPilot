@@ -95,9 +95,10 @@ workAuthorization: { canada: { authorizedToWork: null, needsSponsorship: null } 
 student: { currentlyEnrolled: true, expectedGraduation: "2028-01" }
 availability: { term: Été 2027, termEn: Summer 2027, startDate: "2027-05-03", endDate: "2027-08-31" }
 voluntaryDisclosures: { gender: prefer not }
-education: [{ school: Université Exemple, degree: Maîtrise en informatique, start: "2026-01", end: "2028-01", current: true }]
+education: [{ school: Université Exemple, degree: Maîtrise en informatique, start: "2026-01", end: "2028-01", current: true, gpa: "4.0/4.3" }]
 experience: [{ title: Stagiaire ML, company: Exemple Inc., start: "2025-05", end: "2025-08" }]
 skills: [Python, SQL, MLflow, Databricks]
+languages: [{ language: Français, languageEn: French, level: "" }, { language: Anglais, languageEn: English, level: "" }]
 customKeepMe: { note: ne pas écraser }
 letter: { signatureName: Marie Tremblay }
 `);
@@ -177,6 +178,57 @@ async function main() {
     check('modification concurrente protégée (409)', stale.status === 409 && fs.readFileSync(TEST_PROFILE, 'utf8') === external);
     check('pas de fichier temporaire résiduel', !fs.readdirSync(OUT).some((f) => f.endsWith('.tmp')));
     check('pas de pollution de prototype', Object.prototype.polluted === undefined);
+
+    console.log('Profil : stage crédité, langues, relevé de notes');
+    const p2 = await api('GET', '/profile');
+    const paths = new Set((p2.data.fields || []).map((f) => f.path));
+    check('nouveaux champs proposés', ['student.creditedInternship', 'documents.transcript', 'languages.0.level', 'languages.1.level'].every((k) => paths.has(k)));
+    const rev2 = p2.data.revision;
+    const snap2 = fs.readFileSync(TEST_PROFILE, 'utf8');
+    for (const [name, v] of [['chemin relatif refusé', 'releve.pdf'], ['fichier absent refusé', path.join(OUT, 'absent.pdf')], ['autre format refusé', TEST_CONFIG]]) {
+      const bad = await api('PUT', '/profile', { revision: rev2, values: { 'documents.transcript': v } });
+      check(`relevé : ${name}`, bad.status === 400 && fs.readFileSync(TEST_PROFILE, 'utf8') === snap2, bad.data.error);
+    }
+    const transcriptFile = path.join(OUT, 'Marie_Tremblay_Releve.pdf');
+    fs.writeFileSync(transcriptFile, `%PDF-1.4\n${'% releve fictif\n'.repeat(80)}%%EOF\n`);
+    const p3 = await api('PUT', '/profile', { revision: rev2, values: {
+      'documents.transcript': `"${transcriptFile}"`, // collé avec guillemets depuis l'Explorateur
+      'student.creditedInternship': true,
+      'languages.1.level': 'courant',
+    } });
+    check('relevé, stage crédité et niveau enregistrés', p3.status === 200 && p3.data.profile?.documents?.transcript === transcriptFile && p3.data.profile?.student?.creditedInternship === true, p3.data.error);
+    check('niveau de la bonne langue seulement', p3.data.profile?.languages?.[1]?.level === 'courant' && p3.data.profile?.languages?.[0]?.level === '' && p3.data.profile?.languages?.[1]?.languageEn === 'English');
+    const h2 = await api('GET', '/health');
+    check('relevé signalé au panneau', h2.data.documents?.transcript === true);
+    const tr = await api('GET', '/documents/transcript?base64=1');
+    check('relevé servi en base64', tr.status === 200 && tr.data.name === 'Marie_Tremblay_Releve.pdf' && tr.data.base64?.length > 100);
+
+    console.log('Exigences repérées dans l’offre');
+    const reqJob = {
+      ...SAMPLE_JOB,
+      url: 'https://exemple.wd3.myworkdayjobs.com/fr-CA/Carrieres/job/Montreal/Stagiaire-IA-Hiver-2027_R-777',
+      jobKey: 'exemple.wd3.myworkdayjobs.com/stagiaire-ia-hiver-2027_r-777',
+      title: 'Stagiaire IA – Hiver 2027',
+      description: `Le poste s’effectue exclusivement en présentiel, du lundi au vendredi.
+Ce que nous recherchons : être inscrit dans une université canadienne ; avoir une moyenne cumulative d’au moins 3,50.
+Must complete a university-credited internship during the Winter 2027 semester.
+Applicants must submit a cover letter, résumé, and transcript as part of their application.
+Bilinguisme (français et anglais) requis.
+Le candidat devra réussir une vérification des antécédents judiciaires et des marchandises contrôlées.
+The typical hiring range for this position is $27,50 to $30,50 CAD per hour.
+Posting End Date 2026-10-14`,
+    };
+    const rq = await api('POST', '/applications', { job: reqJob });
+    const R = Object.fromEntries((rq.data.requirements || []).map((r) => [r.id, r]));
+    check('relevé exigé → déjà configuré', R.transcript?.status === 'ok', JSON.stringify(R.transcript));
+    check('stage crédité → profil : oui', R.credit?.status === 'ok');
+    check('GPA minimum 3,50 comparé (4.0/4.3)', R.gpa?.status === 'ok' && /3,50/.test(R.gpa.label), JSON.stringify(R.gpa));
+    check('lettre, bilinguisme, présentiel, vérifications', ['letter', 'french', 'onsite', 'checks'].every((k) => R[k]), Object.keys(R).join(','));
+    check('rémunération et date limite', /27,50/.test(R.pay?.note || '') && /2026-10-14/.test(R.deadline?.label || ''), `${R.pay?.note} | ${R.deadline?.label}`);
+    check('extrait source fourni', /transcript/i.test(R.transcript?.excerpt || ''));
+    const rqGet = await api('GET', `/applications/${rq.data.application.id}`);
+    check('exigences renvoyées à la reprise', rqGet.data.requirements?.length === rq.data.requirements.length);
+    await api('DELETE', `/applications/${rq.data.application.id}`);
 
     console.log('Navigation et session Workday');
     const offer = 'https://example.wd3.myworkdayjobs.com/en-US/Careers/job/City/ML-Intern_R-123';

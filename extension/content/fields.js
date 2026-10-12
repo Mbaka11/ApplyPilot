@@ -8,10 +8,15 @@
   const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'password']);
   const PLACEHOLDER_RE = /^(select one|select|choose|choisir|choisissez|sélectionner|selectionner|sélectionnez|selectionnez|aucune? sélection|no selection|--+|please select|veuillez (choisir|sélectionner))\b/i;
 
+  // Le compteur vit sur AP : après une mise à jour de l'extension, les scripts sont réinjectés dans
+  // une page dont les champs portent déjà des identifiants ; repartir de 0 créerait des doublons.
   function idFor(el) {
     let id = el.getAttribute('data-applypilot-id');
     if (!id) {
-      id = `ap${AP.frameToken || 'x'}-${++counter}`;
+      do {
+        AP.idCounter = (AP.idCounter || counter) + 1;
+        id = `ap${AP.frameToken || 'x'}-${AP.idCounter}`;
+      } while (document.querySelector(`[data-applypilot-id="${id}"]`));
       el.setAttribute('data-applypilot-id', id);
     }
     return id;
@@ -179,15 +184,15 @@
     if (/work ?experience|experience|employment|emploi|work history/.test(t)) return 'experience';
     if (/education|formation|scolarit|etudes|school/.test(t)) return 'education';
     if (/language|langue/.test(t)) return 'language';
-    if (/website|site web|url/.test(t)) return 'website';
+    if (/web ?sites?|sites? web|sites? internet|web ?address|\burl\b/.test(t)) return 'website';
     if (/certification|licen[cs]e/.test(t)) return 'certification';
     return null;
   };
 
   /** Bloc répété (Expérience 1, Formation 2…) contenant le champ. */
   function entryInfo(el) {
-    const m = /^(workExperience|education|languages?|websites?|certifications?)-(\d+)--/i.exec(el.id || '') ||
-      /^(workExperience|education|languages?|websites?|certifications?)-(\d+)--/i.exec(el.getAttribute('name') || '');
+    const m = /^(workExperience|education|languages?|websites?|webAddress|certifications?)-(\d+)--/i.exec(el.id || '') ||
+      /^(workExperience|education|languages?|websites?|webAddress|certifications?)-(\d+)--/i.exec(el.getAttribute('name') || '');
     let node = el.parentElement;
     for (let depth = 0; node && node !== document.body && depth < 12; depth++, node = node.parentElement) {
       const aid = node.getAttribute('data-automation-id') || '';
@@ -376,7 +381,18 @@
   }
 
   /** Inventaire des champs remplissables de la page (ou d'une portion). */
+  /** Identifiants en double (pages ouvertes avant une mise à jour de l'extension) : on les réattribue. */
+  function dedupeIds() {
+    const seen = new Set();
+    for (const e of document.querySelectorAll('[data-applypilot-id]')) {
+      const id = e.getAttribute('data-applypilot-id');
+      if (seen.has(id)) e.removeAttribute('data-applypilot-id');
+      else seen.add(id);
+    }
+  }
+
   function scanFields(root = document) {
+    dedupeIds();
     const out = [];
     const doneRadio = new Set();
     const doneDate = new Set();
@@ -397,6 +413,9 @@
         const scope = el.form || document;
         let group = [];
         if (el.name) group = [...scope.querySelectorAll(`input[type="${kind}"][name="${CSS.escape(el.name)}"]`)];
+        // Workday réutilise le même name dans chaque bloc répété (ex. « Je parle couramment » par langue).
+        const ff = el.closest('[data-automation-id^="formField"]');
+        if (ff && group.length > 1) group = group.filter((g) => ff.contains(g));
         if (kind === 'radio' && group.length <= 1) {
           const c = el.closest('[role="radiogroup"], fieldset') || el.parentElement?.parentElement;
           group = c ? [...c.querySelectorAll('input[type="radio"]')] : [el];

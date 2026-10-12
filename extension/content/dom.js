@@ -2,7 +2,18 @@
 (() => {
   const AP = (globalThis.ApplyPilot = globalThis.ApplyPilot || {});
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Chaque pause rattrape les déplacements de focus faits par la page pendant l'attente.
+  const sleep = (ms) =>
+    new Promise((r) =>
+      setTimeout(() => {
+        try {
+          syncFocus();
+        } catch {
+          /* page en cours de déchargement */
+        }
+        r();
+      }, ms),
+    );
 
   /** Attend qu'une fonction renvoie une valeur « vraie » (tableau non vide accepté). */
   async function waitFor(fn, { timeout = 3000, interval = 80 } = {}) {
@@ -145,12 +156,105 @@
     await sleep(60);
   }
 
+  // ----- Focus -----
+  // Quand la page n'a pas le focus (clic dans le panneau latéral, onglet en arrière-plan),
+  // Chrome déplace bien document.activeElement mais ne déclenche AUCUN événement focus/blur.
+  // Or Workday (React) n'enregistre un champ qu'à sa sortie (blur) : la valeur s'affiche,
+  // puis « The field City is required ». On émet donc ces événements nous-mêmes, comme un vrai clic.
+  const FOCUSABLE = 'input, select, textarea, button, a[href], [tabindex], [contenteditable=""], [contenteditable="true"]';
+  let virtualFocus = null;
+
+  function pageHasFocus() {
+    try {
+      return document.hasFocus();
+    } catch {
+      return true;
+    }
+  }
+
+  function fireFocus(el, type, related) {
+    const bubbles = type === 'focusin' || type === 'focusout';
+    el.dispatchEvent(new FocusEvent(type, { bubbles, composed: true, relatedTarget: related || null }));
+  }
+
+  const isFocusable = (el) => !!el?.matches?.(FOCUSABLE) && !el.disabled;
+
+  /**
+   * La page déplace parfois le focus elle-même (ex. Workday met le focus sur la liste ouverte,
+   * puis le rend au bouton). Sans focus de fenêtre, Chrome ne signale rien : on rattrape ici
+   * ces changements pour que les composants reçoivent les mêmes blur/focus qu'avec un vrai clavier.
+   */
+  function syncFocus() {
+    if (pageHasFocus()) {
+      virtualFocus = null;
+      return;
+    }
+    const a = document.activeElement;
+    const cur = a && a !== document.body && a !== document.documentElement ? a : null;
+    if (cur === virtualFocus || (!cur && !virtualFocus)) return;
+    const prev = virtualFocus;
+    virtualFocus = cur;
+    if (prev?.isConnected) {
+      fireFocus(prev, 'blur', cur);
+      fireFocus(prev, 'focusout', cur);
+    }
+    if (cur) {
+      fireFocus(cur, 'focus', prev);
+      fireFocus(cur, 'focusin', prev);
+    }
+  }
+
   function focus(el) {
+    if (!el) return;
+    syncFocus();
+    const prev = virtualFocus;
     try {
       el.focus({ preventScroll: true });
     } catch {
       /* non focalisable */
     }
+    if (pageHasFocus()) {
+      virtualFocus = null; // Chrome s'en charge
+      return;
+    }
+    if (!isFocusable(el) || prev === el) return;
+    if (prev?.isConnected) {
+      fireFocus(prev, 'blur', el);
+      fireFocus(prev, 'focusout', el);
+    }
+    virtualFocus = el;
+    fireFocus(el, 'focus', prev);
+    fireFocus(el, 'focusin', prev);
+  }
+
+  function blur(el) {
+    if (!el) return;
+    syncFocus();
+    const wasVirtual = virtualFocus === el && !pageHasFocus();
+    try {
+      el.blur();
+    } catch {
+      /* ignore */
+    }
+    if (virtualFocus === el) virtualFocus = null;
+    if (wasVirtual && el.isConnected) {
+      fireFocus(el, 'blur');
+      fireFocus(el, 'focusout');
+    }
+  }
+
+  /** Élément qui a le focus, y compris le focus émulé quand la page est en arrière-plan. */
+  function focusedElement() {
+    syncFocus();
+    if (virtualFocus?.isConnected && !pageHasFocus()) return virtualFocus;
+    const a = document.activeElement;
+    return a && a !== document.body ? a : null;
+  }
+
+  /** Fin de remplissage : le dernier champ actif est validé (blur). */
+  function releaseFocus() {
+    const el = focusedElement();
+    if (el && el.matches?.('input, textarea, select')) blur(el);
   }
 
   /** Simule la frappe caractère par caractère (pour les champs de recherche et composants exigeants). */
@@ -160,7 +264,7 @@
       setNativeValue(el, '');
       el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
     }
-    let cur = clear ? '' : el.value;
+    let cur = clear ? '' : el.value || '';
     for (const ch of String(text)) {
       key(el, 'keydown', ch);
       key(el, 'keypress', ch);
@@ -173,18 +277,18 @@
   }
 
   /** Affecte une valeur à un input/textarea contrôlé (React & co.), avec repli sur la frappe simulée. */
-  async function setValue(el, value, { blur = true } = {}) {
+  async function setValue(el, value, { blur: leave = true } = {}) {
     const v = String(value ?? '');
     focus(el);
     setNativeValue(el, v);
     el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertReplacementText', data: v }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-    if (blur) el.blur?.();
+    if (leave) blur(el);
     await sleep(40);
     if (el.value !== v) {
       await typeText(el, v);
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      if (blur) el.blur?.();
+      if (leave) blur(el);
       await sleep(40);
     }
     return el.value;
@@ -213,8 +317,16 @@
     el.dispatchEvent(new PointerEvent('pointerover', ptr));
     el.dispatchEvent(new MouseEvent('mouseover', base));
     el.dispatchEvent(new PointerEvent('pointerdown', ptr));
-    el.dispatchEvent(new MouseEvent('mousedown', base));
-    focus(el);
+    // Comme dans un vrai navigateur, le focus change seulement si mousedown n'est pas annulé
+    // (les listes Workday l'annulent pour garder le champ de recherche actif).
+    if (el.dispatchEvent(new MouseEvent('mousedown', base))) {
+      const target = el.closest?.(FOCUSABLE);
+      if (target && !target.disabled) focus(target);
+      else {
+        const cur = focusedElement();
+        if (cur && !cur.contains(el)) blur(cur);
+      }
+    }
     el.dispatchEvent(new PointerEvent('pointerup', { ...ptr, buttons: 0 }));
     el.dispatchEvent(new MouseEvent('mouseup', { ...base, buttons: 0 }));
     el.click();
@@ -289,6 +401,10 @@
     key,
     press,
     focus,
+    blur,
+    focusedElement,
+    releaseFocus,
+    pageHasFocus,
     click,
     highlight,
     clearHighlights,

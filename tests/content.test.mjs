@@ -27,7 +27,7 @@ const PROFILE = {
   },
   links: { linkedin: 'https://www.linkedin.com/in/marie', github: 'https://github.com/marie', portfolio: 'https://marie.dev' },
   workAuthorization: { canada: { authorizedToWork: true, needsSponsorship: false }, us: { authorizedToWork: null, needsSponsorship: null } },
-  student: { currentlyEnrolled: true, expectedGraduation: '2027-04' },
+  student: { currentlyEnrolled: true, expectedGraduation: '2027-04', creditedInternship: true },
   availability: { term: 'Été 2027', termEn: 'Summer 2027', startDate: '2027-05-03' },
   preferences: { howDidYouHear: 'LinkedIn', howDidYouHearAlternatives: ['Job Board'] },
   standardAnswers: { over18: true, relativesAtCompany: false },
@@ -41,13 +41,14 @@ const PROFILE = {
     { title: 'ML Intern', company: 'Pratt & Whitney Canada', location: 'Longueuil, QC', start: '2025-06', end: '2025-09', current: false, description: 'Predictive maintenance models.' },
   ],
   skills: ['Python', 'PyTorch', 'SQL'],
-  languages: [{ language: 'Français', languageEn: 'French', level: 'Natif' }, { language: 'Anglais', languageEn: 'English', level: 'Courant' }],
+  languages: [{ language: 'Français', languageEn: 'French', level: 'Natif' }, { language: 'Anglais', languageEn: 'English', level: 'Courant' }, { language: 'Russe', languageEn: 'Russian', level: '' }],
 };
 
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n').toString('base64');
 const FILES = {
   cv: { name: 'Marie_Tremblay_CV_EN.pdf', base64: PDF, type: 'application/pdf' },
   letter: { name: 'Marie_Tremblay_Cover_Letter_Nordique_Analytique.pdf', base64: PDF, type: 'application/pdf' },
+  transcript: { name: 'Marie_Tremblay_Releve.pdf', base64: PDF, type: 'application/pdf' },
 };
 const PAYLOAD = {
   profile: PROFILE,
@@ -120,8 +121,14 @@ async function main() {
     check('mot de passe jamais mémorisé', !JSON.stringify(loginCapture.items).includes('chrome-test-fixture'));
     check('connexion jamais envoyée', (await page.evaluate(() => window.loginAttempts)) === 0);
 
-    console.log('Workday — Mes informations');
+    // Comme avec le panneau latéral : la page n'a pas le focus, Chrome n'émet alors aucun focus/blur.
+    const front = await browser.newPage();
+    await front.setContent('<p>Panneau ApplyPilot (premier plan)</p>');
+
+    console.log('Workday — Mes informations (page en arrière-plan)');
     await load(page, 'workday-myinfo.html');
+    await front.bringToFront();
+    check('page sans focus, comme pendant un clic dans le panneau', !(await page.evaluate(() => document.hasFocus())));
     const r1 = await run(page, 'fill', PAYLOAD);
     await new Promise((r) => setTimeout(r, 150)); // laisse les champs « contrôlés » se resynchroniser
     check('pays réglé en premier (bloc adresse recréé)', (await page.evaluate(() => window.addressRenderedFor)) === 'Canada');
@@ -141,9 +148,13 @@ async function main() {
     check('déjà travaillé ici → Non', await page.$eval('#pw-no', (e) => e.checked));
     check('nom préféré non coché', !(await page.$eval('[data-automation-id="preferredNameCheckbox"]', (e) => e.checked)));
     check('menu de langue (en-tête) ignoré', (await val(page, '[data-automation-id="languagePicker"]')) === 'English');
+    const notCommitted = await page.evaluate(() => Mock.missingRequired());
+    check('Workday a enregistré chaque champ (sans clic manuel)', notCommitted.length === 0, notCommitted.join(', '));
     const fails1 = r1.results.filter((x) => ['fail', 'unresolved'].includes(x.status));
     check('aucun échec', fails1.length === 0, fails1.map((x) => `${x.label}:${x.status}`).join(', '));
+    await page.bringToFront(); // capture impossible en arrière-plan
     await page.screenshot({ path: path.join(OUT, 'workday-myinfo.png'), fullPage: true });
+    await front.bringToFront();
 
     console.log('Workday — Mon expérience');
     await load(page, 'workday-experience.html');
@@ -173,11 +184,50 @@ async function main() {
     const uploaded = await page.$$eval('#uploaded li', (els) => els.map((e) => e.textContent));
     check('CV + lettre joints (champ multiple)', uploaded.length === 2 && uploaded[0].startsWith('Marie_Tremblay_CV') && uploaded[1].includes('Cover_Letter'), uploaded.join(' | '));
     check('LinkedIn', (await val(page, '#socialNetworkAccounts--linkedInAccount')) === 'https://www.linkedin.com/in/marie');
+    const skills = await pills(page, 'skills');
+    check('compétences ajoutées en pastilles (page en arrière-plan)', skills.length === 3 && skills[0].startsWith('Python') && skills[2].startsWith('SQL'), skills.join(' | '));
     await run(page, 'fill', PAYLOAD);
     const uploaded2 = await page.$$eval('#uploaded li', (els) => els.length);
     const groups2 = await page.$$eval('[role="group"]', (els) => els.length);
     check('2e remplissage : pas de doublon (fichiers, blocs)', uploaded2 === 2 && groups2 === 4, `${uploaded2} fichiers, ${groups2} blocs`);
-    await page.screenshot({ path: path.join(OUT, 'workday-experience.png'), fullPage: true });
+    console.log('Workday — Langues et sites Web (page en arrière-plan, listes Canvas Kit)');
+    await load(page, 'workday-langues.html');
+    const r5 = await run(page, 'fill', PAYLOAD);
+    await new Promise((r) => setTimeout(r, 150));
+    const langs = await page.$$eval('#langSection [role="group"]', (gs) =>
+      gs.map((g) => ({
+        lang: g.querySelector('button[name="language"]').textContent.trim(),
+        levels: [...g.querySelectorAll('button[name^="2f49"]')].map((b) => b.textContent.replace(/\s+/g, ' ').trim()),
+        fluent: g.querySelector('input[type="checkbox"]').checked,
+      })),
+    );
+    check('langues : un bloc ajouté par langue avec niveau (Russe sans niveau ignoré)', langs.length === 2, JSON.stringify(langs));
+    check('langue 1 : Français, natif → 5 - Maîtrise parfaite', langs[0]?.lang === 'Français' && langs[0].levels.every((l) => l === '5 - Maîtrise parfaite'), JSON.stringify(langs[0]));
+    check('langue 2 : Anglais, courant → 4 - Avancé', langs[1]?.lang === 'Anglais' && langs[1].levels.every((l) => l === '4 - Avancé'), JSON.stringify(langs[1]));
+    check('« Je parle couramment » coché dans chaque bloc (même name)', langs.every((l) => l.fluent));
+    const sites = await page.$$eval('input[id^="webAddress-"]', (els) => els.map((e) => e.value));
+    check('sites Web : GitHub puis portfolio, sans doublon LinkedIn', sites.join(' | ') === `${PROFILE.links.github} | ${PROFILE.links.portfolio}`, sites.join(' | '));
+    const leaked = await page.$$eval('input', (els) => els.filter((e) => /rue Exemple/.test(e.value)).map((e) => e.id));
+    check('« webAddress-15 » ne reçoit pas l’adresse postale', leaked.length === 0, leaked.join(', '));
+    check('LinkedIn (champ dédié)', (await val(page, '#socialNetworkAccounts--linkedInAccount')) === PROFILE.links.linkedin);
+    check('graduation « mois et année » → MM/AAAA', (await val(page, '#primaryQuestionnaire--grad')) === '04/2027', await val(page, '#primaryQuestionnaire--grad'));
+    const cote = r5.unresolved.find((u) => /cote de securite|Cote de sécurité/i.test(u.label));
+    check('liste inconnue sondée pour l’IA', JSON.stringify(cote?.options) === '["Aucune","Fiabilité","Secret"]', JSON.stringify(cote?.options));
+    check('aucune liste laissée ouverte (focus émulé)', (await page.$$eval('.cks', (els) => els.length)) === 0);
+    const ids = await page.evaluate(() => {
+      // Réinjection après mise à jour : un ancien identifiant se retrouve en double.
+      const els = [...document.querySelectorAll('[data-applypilot-id]')];
+      els[1].setAttribute('data-applypilot-id', els[0].getAttribute('data-applypilot-id'));
+      const f = window.ApplyPilot.scanFields();
+      return { n: f.length, unique: new Set(f.map((d) => d.id)).size };
+    });
+    check('identifiants en double réattribués', ids.n === ids.unique, JSON.stringify(ids));
+    check('stage crédité (profil : oui) → Oui', (await val(page, '#primaryQuestionnaire--credit')) === 'Oui', await val(page, '#primaryQuestionnaire--credit'));
+    const tfiles = await page.$$eval('#transcriptFiles li', (els) => els.map((e) => e.textContent));
+    check('relevé configuré joint au champ « relevé de notes » (et rien d’autre)', tfiles.join() === FILES.transcript.name, tfiles.join());
+
+    await page.bringToFront();
+    await page.screenshot({ path: path.join(OUT, 'workday-langues.png'), fullPage: true });
 
     console.log('Workday — Questions');
     await load(page, 'workday-questions.html');

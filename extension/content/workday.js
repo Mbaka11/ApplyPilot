@@ -30,9 +30,16 @@
     await AP.sleep(900);
   }
 
+  // Sections "répétées" : expériences et formations seulement si la section est vide ;
+  // langues et sites Web complétés tant que les blocs présents sont vierges (Workday en affiche souvent un vide).
   const SECTIONS = {
-    experience: /^(work experience|experience professionnelle|experiences? professionnelles?|employment history|work history|experience)$/,
-    education: /^(education|formation|formation academique|scolarite|etudes)$/,
+    experience: {
+      re: /^(work experience|experience professionnelle|experiences? professionnelles?|employment history|work history|experience)$/,
+      wanted: (c) => c.p.experience || [],
+    },
+    education: { re: /^(education|formation|formation academique|scolarite|etudes)$/, wanted: (c) => c.p.education || [] },
+    language: { re: /^(languages?|langues?|competences linguistiques|language skills)$/, wanted: (c) => AP.langEntries(c).filter((l) => AP.levelInfo(l.level)), topUp: true },
+    website: { re: /^(websites?|web sites?|sites web|sites internet|liens|links)$/, wanted: (c) => AP.websiteList(c), topUp: true },
   };
 
   function addButtonAfter(heading) {
@@ -55,11 +62,15 @@
     return ids.size;
   }
 
+  /** Un bloc déjà saisi (par toi ou par le site) empêche d'ajouter des blocs : rien n'est dupliqué. */
+  const hasFilledEntry = (scope, type) => AP.scanFields(scope).some((d) => d.entryType === type && d.kind !== 'checkbox' && !d.isEmpty);
+
   /** Ajoute les blocs expérience/formation manquants (seulement si la section est vide). */
   async function ensureEntries(ctx) {
-    const added = { experience: 0, education: 0 };
-    for (const [type, re] of Object.entries(SECTIONS)) {
-      const wanted = (type === 'experience' ? ctx.p.experience : ctx.p.education) || [];
+    const added = { experience: 0, education: 0, language: 0, website: 0 };
+    AP.computePageFlags(ctx, AP.scanFields()); // ex. champ LinkedIn dédié : pas de bloc « site Web » pour lui
+    for (const [type, { re, wanted: want, topUp }] of Object.entries(SECTIONS)) {
+      const wanted = want(ctx) || [];
       if (!wanted.length) continue;
       const heading = [...document.querySelectorAll('h2, h3, h4, legend, [role="heading"]')].find(
         (h) => AP.isVisible(h) && re.test(AP.norm(AP.textOf(h))),
@@ -67,8 +78,9 @@
       if (!heading) continue;
       const found = addButtonAfter(heading);
       if (!found) continue;
-      if (countEntries(found.scope, type) > 0) continue;
-      const max = Math.min(wanted.length, Number(ctx.options.maxEntries) || 6);
+      const existing = countEntries(found.scope, type);
+      if (topUp ? hasFilledEntry(found.scope, type) : existing > 0) continue;
+      const max = Math.min(wanted.length, Number(ctx.options.maxEntries) || 6) - (topUp ? existing : 0);
       for (let i = 0; i < max; i++) {
         const current = addButtonAfter(heading);
         if (!current) break;

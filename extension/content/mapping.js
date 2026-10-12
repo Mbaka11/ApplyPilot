@@ -28,6 +28,7 @@
   const YESNO_KINDS = [...CHOICE, 'checkbox', 'text'];
   const TEXT = ['text', 'textarea', 'combobox'];
   const LETTER_RE = /cover|lettre|motivation|letter/;
+  const TRANSCRIPT_RE = /transcript|releve de notes|releves de notes|bulletin/;
   const CV_RE = /resume|\bcv\b|curriculum|\bc v\b/;
 
   const blank = (v) => v === undefined || v === null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
@@ -65,7 +66,12 @@
     const near = d.el.closest('section, fieldset, [data-automation-id^="formField"], [data-automation-id$="Section"]');
     const s = `${d.sig} ${AP.norm(d.section)} ${AP.norm(AP.textOf(near).slice(0, 200))}`;
     const { cv, letter } = c.files;
-    if (/transcript|releve de notes|bulletin|writing sample|work sample|portfolio/.test(s) && !CV_RE.test(s)) {
+    if (TRANSCRIPT_RE.test(s) && !CV_RE.test(s)) {
+      return c.files.transcript
+        ? { value: [c.files.transcript], confidence: 0.9, source: 'relevé', review: true, note: 'Relevé de notes (Profil → Documents) : vérifie que c’est le plus récent' }
+        : { missing: true, note: 'Relevé de notes : indique son chemin dans Profil → Documents' };
+    }
+    if (/writing sample|work sample|portfolio/.test(s) && !CV_RE.test(s)) {
       return { missing: true, note: 'Pièce à joindre toi-même (relevé, portfolio…)' };
     }
     if (LETTER_RE.test(s) && !CV_RE.test(s)) {
@@ -117,6 +123,56 @@
     return null;
   }
 
+  // ----- Langues (blocs Workday « Langues n ») -----
+  // Niveau du profil (texte libre FR/EN) → options usuelles des formulaires, par ordre de préférence.
+  const LEVELS = [
+    { re: /natif|native|maternelle|mother tongue|langue premiere|first language/, fluent: true,
+      wants: ['Maîtrise parfaite', 'Native', 'Natif', 'Langue maternelle', 'Native or bilingual proficiency', 'Expert', 'Bilingue', 'Bilingual', 'Courant', 'Fluent'] },
+    { re: /courant|couramment|fluent|bilingue|bilingual|professionnel/, fluent: true,
+      wants: ['Courant', 'Fluent', 'Avancé', 'Advanced', 'Full professional proficiency', 'Professional working proficiency', 'Proficient'] },
+    { re: /avance|advanced/, fluent: true, wants: ['Avancé', 'Advanced', 'Courant', 'Fluent', 'Professional working proficiency'] },
+    { re: /intermediaire|intermediate|fonctionnel|working/, fluent: false, wants: ['Intermédiaire', 'Intermediate', 'Limited working proficiency', 'Moyen'] },
+    { re: /notions|debutant|beginner|basic|elementaire|elementary|\bbase\b/, fluent: false,
+      wants: ['Débutant', 'Beginner', 'Notions', 'Basic', 'Elementary', 'Elementary proficiency', 'Élémentaire'] },
+  ];
+  const levelInfo = (level) => (blank(level) ? null : LEVELS.find((x) => x.re.test(AP.norm(level))) || null);
+
+  /** Langues à inscrire, dans l'ordre : celles dont le niveau est connu (sinon toutes). */
+  function langEntries(c) {
+    const all = (c.p.languages || []).filter((l) => !blank(l.language) || !blank(l.languageEn));
+    const withLevel = all.filter((l) => levelInfo(l.level));
+    return withLevel.length ? withLevel : all;
+  }
+
+  function languageEntryRule(d, c) {
+    const l = langEntries(c)[d.entryIndex];
+    if (!l) return { skip: true, note: `Pas de ${d.entryIndex + 1}e langue dans le profil` };
+    const names = (c.lang === 'en' ? [l.languageEn, l.language] : [l.language, l.languageEn]).filter((x) => !blank(x));
+    const info = levelInfo(l.level);
+    const path = `languages[${names[0]}].level`;
+    if (d.kind === 'checkbox') {
+      if (!/couramment|courant|fluent|native|natif|maternelle/.test(d.sig)) return null;
+      return info ? { value: info.fluent, confidence: 0.9, source: 'profil' } : missing(path);
+    }
+    if (/^(langue|language|langues|languages)$/.test(d.labelNorm)) return val(names, { alts: names });
+    if (CHOICE.includes(d.kind) || d.kind === 'text') return info ? val(info.wants, { note: `Niveau du profil : ${l.level}` }) : missing(path);
+    return null;
+  }
+
+  // ----- Sites Web (blocs Workday « Sites Web n ») -----
+  function websiteList(c) {
+    const l = c.p.links || {};
+    const list = [l.github, l.portfolio, ...(Array.isArray(l.other) ? l.other : [])];
+    if (!c.page.hasLinkedInField) list.unshift(l.linkedin);
+    return [...new Set(list.filter((u) => !blank(u)))];
+  }
+
+  function websiteEntryRule(d, c) {
+    if (d.kind !== 'text') return null;
+    const u = websiteList(c)[d.entryIndex];
+    return u ? val(u) : { skip: true, note: `Pas de ${d.entryIndex + 1}e site Web dans le profil` };
+  }
+
   const R = (id, test, fn, opts = {}) => ({ id, test, fn, ...opts });
 
   const RULES = [
@@ -127,9 +183,11 @@
       (d, c) => (c.letterText ? { value: c.letterText, confidence: 0.95, source: 'lettre' } : { missing: true, note: 'Génère la lettre d’abord' }), { kinds: TEXT }),
     R('experience', null, experienceRule, { when: (d) => d.entryType === 'experience', stop: true }),
     R('education', null, educationRule, { when: (d) => d.entryType === 'education', stop: true }),
+    R('languageEntry', null, languageEntryRule, { when: (d) => d.entryType === 'language', stop: true }),
+    R('websiteEntry', null, websiteEntryRule, { when: (d) => d.entryType === 'website', stop: true }),
 
     // Identité
-    R('preferredNameCheck', /preferred name|nom prefere|prenom usuel/, (d, c) => ({ value: !blank(c.p.identity?.preferredName), confidence: 0.9, source: 'profil' }), { kinds: ['checkbox'] }),
+    R('preferredNameCheck', /preferred name|nom prefere|prenom usuel|nom d.?usage/, (d, c) => ({ value: !blank(c.p.identity?.preferredName), confidence: 0.9, source: 'profil' }), { kinds: ['checkbox'] }),
     R('preferredName', /preferred|prefere|nickname|surnom|usuel/, (d, c) => (blank(c.p.identity?.preferredName) ? { skip: true } : val(c.p.identity.preferredName)), { kinds: ['text'] }),
     R('middleName', /middle|second prenom|autre prenom/, () => ({ skip: true }), { kinds: ['text'] }),
     R('firstName', /\b(first|given) ?names?\b|\bprenoms?\b|\bfname\b/, (d, c) => need(c.p.identity?.firstName, 'identity.firstName'), { kinds: ['text'] }),
@@ -157,8 +215,12 @@
     // Adresse
     R('addr2', /address ?line ?2|adresse (ligne )?2|\bapt\b|appartement|\bsuite\b|\bunit\b|address 2|complement d ?adresse/,
       (d, c) => (blank(c.addr.line2) ? { skip: true } : val(c.addr.line2)), { kinds: ['text'] }),
-    R('addr1', /address ?line ?1|street|\brue\b|adresse (ligne )?1|adresse postale|adresse civique|mailing address|home address|address 1/,
-      (d, c) => need(c.addr.line1, 'identity.address.line1'), { kinds: ['text', 'textarea'], labelTest: /^(address|adresse|adresse civique|street address|adresse postale)$/ }),
+    R('addr1', /address ?line ?1\b|street|\brue\b|adresse (ligne )?1\b|adresse postale|adresse civique|mailing address|home address|\baddress 1\b/,
+      (d, c) => need(c.addr.line1, 'identity.address.line1'), {
+        kinds: ['text', 'textarea'],
+        labelTest: /^(address|adresse|adresse civique|street address|adresse postale)$/,
+        notTest: /\burl\b|web ?address|site web|website|courriel|e ?mail/,
+      }),
     R('city', /\bcity\b|\bville\b|municipalit|\btown\b|locality|localite/, (d, c) => need(c.addr.city, 'identity.address.city')),
     R('postal', /postal|\bzip\b|postcode/, (d, c) => need(c.addr.postalCode, 'identity.address.postalCode'), { kinds: ['text'] }),
     R('province', /province|\bstate\b|\bregion\b|territor|\betat\b/, (d, c) => need(c.addr.province, 'identity.address.province', { alts: [c.addr.provinceCode].filter(Boolean) }),
@@ -192,6 +254,8 @@
       (d, c) => yesNo(c.p.student?.currentlyEnrolled, 'student.currentlyEnrolled'), { kinds: YESNO_KINDS }),
     R('returning', /return(ing)? to (school|studies|your studies|university)|retour(ner)? aux etudes|poursuivre (vos|tes) etudes|continue (your )?(studies|education)/,
       (d, c) => yesNo(c.p.student?.returningToSchoolAfterInternship, 'student.returningToSchoolAfterInternship'), { kinds: YESNO_KINDS }),
+    R('credited', /stage credite|stage .{0,20}credit|credited internship|internship (for|with) (academic )?credit|for (academic )?credit|credits? universitaires?|credit(e|er)? (par|dans) (ton|votre) programme/,
+      (d, c) => yesNo(c.p.student?.creditedInternship, 'student.creditedInternship'), { kinds: YESNO_KINDS }),
     R('relocate', /relocat|demenag|willing to move|prepared to move/, (d, c) => yesNo(c.p.availability?.willingToRelocate, 'availability.willingToRelocate'), { kinds: YESNO_KINDS }),
     R('relatives', /relative|family member|lien de parente|membre de (votre|ta|la) famille|related to (an|any) (employee|staff)/,
       (d, c) => yesNo(c.p.standardAnswers?.relativesAtCompany, 'standardAnswers.relativesAtCompany'), { kinds: YESNO_KINDS }),
@@ -261,7 +325,7 @@
   const NO_MEMORY = new Set([
     'never', 'consent', 'coverLetterText', 'experience', 'education', 'file', 'preferredName', 'preferredNameCheck', 'middleName',
     'firstName', 'lastName', 'fullName', 'email', 'phone', 'phoneExt', 'addr1', 'addr2', 'city', 'postal', 'linkedin', 'github',
-    'social', 'website', 'school', 'degree', 'field', 'gpa', 'skills',
+    'social', 'website', 'school', 'degree', 'field', 'gpa', 'skills', 'languageEntry', 'websiteEntry',
   ]);
 
   function matches(rule, d) {
@@ -345,7 +409,8 @@
     ctx.page.hasPhoneCode = fields.some((f) => /country (phone )?code|phone code|indicatif|calling code/.test(f.sig));
     ctx.page.fileInputs = fields.filter((f) => f.kind === 'file');
     ctx.page.hasLetterInput = ctx.page.fileInputs.some((f) => LETTER_RE.test(`${f.sig} ${AP.norm(f.section)}`) && !CV_RE.test(f.sig));
+    ctx.page.hasLinkedInField = fields.some((f) => f.kind === 'text' && !f.entryType && /linked ?in/.test(f.sig));
   }
 
-  Object.assign(AP, { resolve, makeContext, computePageFlags, memoryKey, NO_MEMORY, YES, NO, PREFER_NOT });
+  Object.assign(AP, { resolve, makeContext, computePageFlags, memoryKey, NO_MEMORY, YES, NO, PREFER_NOT, langEntries, websiteList, levelInfo });
 })();

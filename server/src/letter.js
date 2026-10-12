@@ -46,13 +46,24 @@ export function formatLetterDate(lang, d = new Date()) {
   return d.toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+/**
+ * Nom d'entreprise court pour les noms de fichiers :
+ * « GIRO Inc. / Le Groupe en informatique… » → « GIRO », « Intact Financial Corporation » → « Intact Financial ».
+ */
+export function shortCompanyName(company) {
+  let s = String(company || '').split(/\s+[/|\u2013\u2014-]\s+|\s*\(/)[0].trim();
+  const legal = /[\s,]+(inc|incorporated|corp|corporation|ltd|ltée|ltee|limited|llc|plc|s\.?a|s\.?e|gmbh|co|company|group|groupe|holdings)\.?$/i;
+  for (let i = 0; i < 3 && legal.test(s); i++) s = s.replace(legal, '').replace(/[\s,&.]+$/, '').trim();
+  return s || String(company || '').trim();
+}
+
 export function letterFileName({ profile, cfg, language, company, title }) {
   const id = profile.identity || {};
   const pattern = language === 'en' ? cfg.letter.fileNameEn : cfg.letter.fileNameFr;
   const name = String(pattern || '{first}_{last}_{company}.pdf')
     .replace(/\{first\}/g, safeFileName(id.firstName || 'Prenom', 30))
     .replace(/\{last\}/g, safeFileName(id.lastName || 'Nom', 30))
-    .replace(/\{company\}/g, safeFileName(company || 'Entreprise', 40))
+    .replace(/\{company\}/g, safeFileName(shortCompanyName(company) || 'Entreprise', 40))
     .replace(/\{title\}/g, safeFileName(title || 'Poste', 40))
     .replace(/\{date\}/g, new Date().toISOString().slice(0, 10));
   return /\.pdf$/i.test(name) ? name : `${name}.pdf`;

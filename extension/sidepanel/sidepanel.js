@@ -201,9 +201,10 @@ async function setActiveApp(id, { quiet = false } = {}) {
     renderApp();
     return;
   }
-  const { application, recommendation } = await api(`/applications/${encodeURIComponent(id)}`);
+  const { application, recommendation, requirements } = await api(`/applications/${encodeURIComponent(id)}`);
   S.app = application;
   S.recommendation = recommendation;
+  S.requirements = requirements || [];
   S.draft = application.letter ? { subject: application.letter.subject, body: application.letter.body } : null;
   S.fill = null;
   await chrome.storage.local.set({ activeAppId: id, activeAppCompany: application.job?.company || '' });
@@ -219,10 +220,11 @@ async function analyze() {
     .sort((a, b) => Number(b.isPosting) - Number(a.isPosting) || (b.description?.length || 0) - (a.description?.length || 0));
   const job = jobs[0];
   if (!job || (!job.title && !job.description)) throw new Error('Aucune offre détectée sur cette page.');
-  const { application, existed, recommendation } = await api('/applications', { method: 'POST', body: { job } });
+  const { application, existed, recommendation, requirements } = await api('/applications', { method: 'POST', body: { job } });
   await loadApps();
   await setActiveApp(application.id, { quiet: true });
   S.recommendation = recommendation;
+  S.requirements = requirements || S.requirements || [];
   renderAppCard();
   toast(existed ? 'Offre déjà connue : candidature reprise' : 'Offre analysée ✓');
 }
@@ -302,6 +304,7 @@ async function fillPage() {
     const files = {};
     if (S.app?.cvId) files.cv = await api(`/cvs/${encodeURIComponent(S.app.cvId)}/pdf?base64=1`);
     if (S.app?.letter?.fileName) files.letter = await api(`/applications/${encodeURIComponent(S.app.id)}/letter.pdf?base64=1`);
+    if (S.health?.documents?.transcript) files.transcript = await api('/documents/transcript?base64=1').catch(() => null);
     const letterText = S.app?.letter?.body ? `${S.app.letter.body}\n\n${signature(profile)}` : '';
     const job = S.app ? { ...S.app.job } : { company: S.page?.company || '', title: S.page?.title || '' };
     const payload = {
@@ -417,6 +420,18 @@ function renderPage() {
     ${p.hasPassword ? '<div class="small muted">🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.</div>' : ''}`;
 }
 
+/** Exigences repérées dans l'offre (pièces, conditions), comparées au profil. */
+function requirementsHtml(reqs) {
+  if (!reqs?.length) return '';
+  const icon = { ok: '✓', todo: '!', warn: '⚠', info: 'ℹ' };
+  const items = reqs
+    .map((r) => `<li class="req ${esc(r.status)}" title="${esc(r.excerpt || '')}"><span class="req-icon">${icon[r.status] || '•'}</span>
+      <span><b>${esc(r.label)}</b>${r.note ? ` <span class="muted">— ${esc(r.note)}</span>` : ''}</span></li>`)
+    .join('');
+  const todo = reqs.filter((r) => r.status === 'todo' || r.status === 'warn').length;
+  return `<details class="reqs" ${todo ? 'open' : ''}><summary>À prévoir pour cette offre${todo ? ` <span class="badge warn">${todo}</span>` : ''}</summary><ul class="req-list">${items}</ul></details>`;
+}
+
 function renderAppCard() {
   const el = $('#appCard');
   if (!S.app) {
@@ -434,6 +449,7 @@ function renderAppCard() {
     .join('');
   el.innerHTML = `<h2><span>Candidature active</span><span class="badge ${a.status === 'soumise' ? 'ok' : ''}">${esc(STATUS_LABEL[a.status] || a.status)}</span></h2>
     <h3>${esc(a.job?.title || 'Poste')}</h3>
+    ${requirementsHtml(S.requirements)}
     <div class="muted">${esc(a.job?.company || '')}${a.job?.location ? ` · ${esc(a.job.location)}` : ''}</div>
     <div class="stack" style="margin-top:10px">
       <div><label class="field" for="cvSelect">CV à joindre ${rec?.cvId ? `<span class="muted">(★ recommandé : ${esc(rec.reason || '')})</span>` : ''}</label>
@@ -512,9 +528,15 @@ function renderFill() {
     body += `<div class="summary">${RES_GROUPS.filter(([k]) => groups[k]?.length)
       .map(([k, t, cls]) => `<span class="badge ${cls}">${groups[k].length} ${t.toLowerCase()}</span>`)
       .join('')}</div>`;
-    if (added && (added.experience || added.education)) {
-      body += `<div class="small muted">Blocs ajoutés : ${added.experience || 0} expérience(s), ${added.education || 0} formation(s).</div>`;
-    }
+    const addedText = [
+      [added?.experience, 'expérience(s)'],
+      [added?.education, 'formation(s)'],
+      [added?.language, 'langue(s)'],
+      [added?.website, 'site(s) Web'],
+    ]
+      .filter(([n]) => n)
+      .map(([n, t]) => `${n} ${t}`);
+    if (addedText.length) body += `<div class="small muted">Blocs ajoutés : ${addedText.join(', ')}.</div>`;
     if (S.fill.noCv) body += '<div class="small" style="color:var(--warn)">Aucun CV joint : analyse l’offre d’abord pour choisir un CV.</div>';
     for (const [k, t] of RES_GROUPS) {
       const list = groups[k];
@@ -585,7 +607,7 @@ function profileField(f) {
   if (f.type === 'boolean') {
     input = `<select ${attrs}>${[['', 'Je réponds moi-même'], ['true', 'Oui'], ['false', 'Non']].map(([v, label]) => `<option value="${v}" ${v === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
   } else {
-    const type = f.type === 'integer' ? 'number' : f.type;
+    const type = f.type === 'integer' ? 'number' : f.type === 'path' ? 'text' : f.type;
     input = `<input ${attrs} type="${esc(type)}" value="${esc(value)}" maxlength="500"
       ${f.autocomplete ? `autocomplete="${esc(f.autocomplete)}"` : 'autocomplete="off"'}
       ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''}

@@ -15,6 +15,7 @@ import {
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
 import { askJson, resolvePi } from './llm.js';
 import { editableProfile, updateProfile } from './profile.js';
+import { detectRequirements, transcriptPath } from './requirements.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
 import { closeBrowser, findChrome, htmlToPdf } from './pdf.js';
 import { buildAnswersPrompt, buildLetterPrompt } from './prompts.js';
@@ -142,6 +143,14 @@ function loadStyleRefs(cfg) {
     .filter((r) => r.text);
 }
 
+function requirementsFor(app) {
+  try {
+    return detectRequirements(app.job, getProfile());
+  } catch {
+    return [];
+  }
+}
+
 function appForClient(app) {
   const { job, ...rest } = app;
   return { ...rest, job: { ...job, descriptionLength: (job?.description || '').length, description: undefined } };
@@ -228,7 +237,17 @@ route('GET', '/health', () => {
     pi: resolvePi(cfg).desc,
     chrome: findChrome(cfg),
     fill: cfg.fill,
+    documents: { transcript: !!(profile && transcriptPath(profile)) },
   };
+});
+
+/** Relevé de notes configuré dans le profil (documents.transcript) : joint aux champs « relevé ». */
+route('GET', '/documents/transcript', ({ query, res }) => {
+  const file = transcriptPath(getProfile());
+  if (!file) throw new HttpError(404, 'Aucun relevé de notes configuré : Profil → Documents');
+  if (query.get('base64')) return fileAsBase64(file, path.basename(file));
+  sendFile(res, file, { type: 'application/pdf', downloadName: path.basename(file) });
+  return undefined;
 });
 
 route('GET', '/profile', () => editableProfile());
@@ -257,13 +276,13 @@ route('POST', '/applications', ({ body }) => {
   const { cvs } = listCvs(getConfig());
   const rec = recommendCv(cvs, job);
   const { app, existed } = createApplication({ job, cvId: body.cvId || rec?.cvId || null, force: !!body.force });
-  return { application: appForClient(app), existed, recommendation: rec };
+  return { application: appForClient(app), existed, recommendation: rec, requirements: requirementsFor(app) };
 });
 
 route('GET', '/applications/:id', ({ params }) => {
   const app = getApplication(params.id);
   const { cvs } = listCvs(getConfig());
-  return { application: appForClient(app), recommendation: recommendCv(cvs, app.job) };
+  return { application: appForClient(app), recommendation: recommendCv(cvs, app.job), requirements: requirementsFor(app) };
 });
 
 route('PATCH', '/applications/:id', ({ params, body }) => {
