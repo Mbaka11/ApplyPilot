@@ -312,6 +312,7 @@ route('PATCH', '/applications/:id', ({ params, body }) => {
   if (body.status !== undefined) {
     if (!STATUSES.includes(body.status)) throw new HttpError(400, `Statut inconnu : ${body.status}`);
     app.status = body.status;
+    if (body.status === 'en cours') app.submittedAt = null; // annuler un marquage erroné, pas une soumission au site
     if (body.status === 'soumise' && !app.submittedAt) app.submittedAt = new Date().toISOString();
   }
   if (body.job && typeof body.job === 'object') {

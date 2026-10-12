@@ -64,6 +64,12 @@ Prérequis :
    - clique sur **Charger l'extension non empaquetée** et choisis le dossier `extension/` ;
    - épingle l'icône ApplyPilot : un clic ouvre le panneau latéral.
 
+### Mettre à jour sans perdre un formulaire ouvert
+
+Pas besoin de supprimer ou de réimporter l’extension : dans `chrome://extensions`, clique sur **↻ Recharger** sur la carte ApplyPilot, puis ferme et rouvre son panneau sur l’onglet de candidature.
+
+Clique ensuite sur **Remplir cette page**. Les nouveaux scripts sont réinjectés sur l’onglet déjà ouvert, sans naviguer ni recharger Workday. Laisse **Remplacer les champs déjà remplis** décoché. Évite F5 tant que tes saisies ne sont pas enregistrées.
+
 ## Utilisation
 
 1. **Ouvre l'offre** (sur Workday, LinkedIn → site de l'entreprise, etc.) puis clique sur **Analyser cette offre**. La candidature devient *active* et reste active pendant que tu passes d'une page à l'autre du formulaire. Le CV le plus adapté est présélectionné (★).
@@ -74,7 +80,7 @@ Prérequis :
    - 🟥 **rouge** : à compléter (info absente du profil : renseigne-la dans l’onglet **Profil**, ou dans `profile.yaml` pour les champs détaillés).
 
    Clique sur un élément de la liste pour aller au champ concerné.
-4. **Vérifie, passe à l'étape suivante**, relance le remplissage, puis **soumets toi-même** et clique sur **J'ai soumis ✓**.
+4. **Vérifie, passe à l'étape suivante**, relance le remplissage, puis **soumets toi-même sur le site de l’employeur**. Seulement après sa confirmation, clique sur **J'ai soumis ✓** : ce bouton ne fait que marquer le journal, il n’envoie rien. Un marquage erroné peut être annulé dans **Journal → En cours** (la fausse date de soumission est retirée).
 5. Suis tes candidatures dans l'onglet **Journal** (statuts : soumise, entrevue, refusée, offre…), avec un export CSV. Le fichier `data/candidatures.csv` est aussi tenu à jour.
 
 ### Astuces Workday
@@ -90,6 +96,14 @@ Prérequis :
 Quand tu cliques dans le panneau latéral, la page n’a plus le focus clavier. Chrome met alors bien à jour les valeurs, mais n’émet **aucun** événement `focus` ou `blur`. Or Workday n’enregistre un champ qu’à sa sortie : il affichait la valeur, puis répondait « The field … is required ».
 
 ApplyPilot émule désormais ces événements, y compris quand Workday déplace le focus lui-même, par exemple vers une liste ouverte. Les tests rejouent ce cas avec une page en arrière-plan.
+
+### Compétences Workday (correctif 0.3.1)
+
+La recherche clique sur la feuille sélectionnable de chaque résultat, plutôt que sur le wrapper qui ne fait que le surligner. Elle relit les contrôles recréés par Workday et vérifie les **pastilles réellement sélectionnées**, y compris quand la liste est repliée. Ni une requête tapée, ni un résultat surligné, ni une annonce ARIA ne sont comptés comme une compétence ajoutée.
+
+Les compétences déjà choisies sont conservées et celles qui manquent sont ajoutées sans doublons, même avec l’écrasement désactivé. Les options non sélectionnées restent signalées à compléter ; elles ne sont pas remplacées par des réponses inventées par l’IA.
+
+Les champs **Location** des expériences viennent de `experience[].location`, indépendamment de `identity.address.city` (ville de résidence). Un lieu vide dans le profil reste à compléter : ne pas le déduire de l’adresse personnelle.
 
 ### Mémoire des réponses
 
@@ -134,9 +148,9 @@ L’éditeur couvre aussi le **stage crédité**, les **niveaux de langue** (nat
 | Problème | Solution |
 |---|---|
 | « Serveur arrêté » dans le panneau | Lance `start.cmd`, puis clique sur le badge pour revérifier |
-| Rien ne se passe sur une page | Recharge la page (F5), surtout après une mise à jour de l'extension |
+| Rien ne se passe après une mise à jour | Recharge l’extension dans `chrome://extensions`, ferme/rouvre le panneau et relance le remplissage ; pas de F5 sur un formulaire non enregistré |
 | Workday : « The field City is required » alors que la valeur est affichée | Corrigé en 0.3.0. Recharge l’extension dans `chrome://extensions`, puis relance **Remplir cette page** |
-| Workday : compétences ou « How did you hear about us? » non ajoutées | Même cause, corrigée en 0.3.0 : le panneau gardait le focus, et Workday n’enregistrait pas les saisies |
+| Workday : recherche tapée mais compétences non sélectionnées | Mets à jour en 0.3.1, recharge l’extension puis relance le remplissage : seules les pastilles vérifiées comptent, les choix existants sont gardés |
 | Pas de formulaire dans l’onglet Profil | Redémarre le serveur, puis recharge l’extension dans `chrome://extensions` |
 | Connexion Workday redemandée | Vérifie que tu utilises le bon profil Chrome et le bon portail entreprise ; la session peut avoir expiré |
 | « Impossible d'écrire … .pdf » | Ferme le PDF s'il est ouvert dans Acrobat ou un autre lecteur |
@@ -151,7 +165,7 @@ npm test                 # serveur + scripts de contenu + extension complète (C
 set APPLYPILOT_TEST_LLM=1 && npm run test:server   # + vraie génération via pi (Windows)
 ```
 
-Les tests utilisent des pages qui imitent Workday et un formulaire générique, ainsi qu'un profil fictif. Ils n'utilisent jamais tes données.
+Les tests utilisent des pages qui imitent Workday et un formulaire générique, ainsi qu'un profil fictif. Ils rejouent le focus du panneau, les feuilles sélectionnables imbriquées, les options différées, les contrôles recréés, les pastilles repliées et la réinjection sans rechargement de page. Ils n'utilisent jamais tes données et ne remplacent pas la validation sur le formulaire réel d’un employeur.
 
 ## Structure
 

@@ -53,8 +53,10 @@ function prepareData() {
 links: { linkedin: "https://www.linkedin.com/in/marie" }
 workAuthorization: { canada: { authorizedToWork: true, needsSponsorship: false } }
 preferences: { howDidYouHear: LinkedIn }
-experience: []
+experience:
+  - { title: ML Intern, company: Nordique Analytique, location: Montréal, start: 2026-01, end: 2026-04, current: false, description: Modèles ML de démonstration. }
 education: []
+skills: [Python, PyTorch, SQL]
 letter: { signatureName: Marie Tremblay }
 `,
   );
@@ -223,6 +225,48 @@ async function main() {
     const uploaded = await site.$$eval('#uploaded li', (els) => els.map((e) => e.textContent));
     check('CV joint depuis le serveur, sous un nom neutre', uploaded.length === 1 && /^Marie_Tremblay_CV\.pdf/.test(uploaded[0]), uploaded.join(' | '));
 
+    // Mise à jour des scripts sur une page déjà remplie : aucune navigation ni perte de saisie.
+    await site.goto(`${FIX_URL}/workday-skills.html`);
+    await sleep(1200);
+    await site.evaluate(() => {
+      window.unsavedTrial = 'ne pas perdre';
+      skillFixture.seed(['Git', 'Python (Programming Language)']);
+      document.getElementById('workExperience-1--location').value = 'Toronto';
+    });
+    await sw.evaluate(async (url) => {
+      const tab = (await chrome.tabs.query({})).find((t) => t.url?.startsWith(url));
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => {
+        const original = globalThis.__applyPilot.run;
+        globalThis.__applyPilot.run = async (cmd, payload) => {
+          const answer = await original(cmd, payload);
+          if (cmd === 'ping') answer.version = '0.0.1';
+          return answer;
+        };
+      } });
+    }, FIX_URL);
+    await panel.bringToFront();
+    await panel.click('[data-action="fill"]');
+    await panel.waitForFunction(() => !document.querySelector('#fillCard .busy') && !!document.querySelector('#fillCard .summary'), { timeout: 60000 });
+    const freshVersion = await sw.evaluate(async (url) => {
+      const tab = (await chrome.tabs.query({})).find((t) => t.url?.startsWith(url));
+      const [reply] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => globalThis.__applyPilot.run('ping') });
+      return reply.result.version;
+    }, FIX_URL);
+    check('ancien script remplacé automatiquement sans recharger Workday', freshVersion === '0.3.1', freshVersion);
+    const savedSkills = await site.evaluate(() => skillFixture.selected());
+    check('panneau : compétences déjà choisies conservées et liste complétée', savedSkills.length === 4 && savedSkills.includes('Git') && savedSkills.includes('SQL (Programming Language)'), savedSkills.join(' | '));
+    check('mise à jour : lieu saisi manuellement et page non enregistrée conservés', (await site.evaluate(() => window.unsavedTrial)) === 'ne pas perdre' && (await site.$eval('#workExperience-1--location', (e) => e.value)) === 'Toronto');
+    check('mise à jour : aucun Suivant/Soumettre ni clic dans une autre liste', (await site.evaluate(() => window.navigationClicks + window.unrelatedClicks)) === 0);
+    await site.$eval('#workExperience-1--location', (e) => { e.value = ''; });
+    await sw.evaluate(async (url) => {
+      const tab = (await chrome.tabs.query({})).find((t) => t.url?.startsWith(url));
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => { delete globalThis.__applyPilot; } });
+    }, FIX_URL);
+    await panel.click('[data-action="fill"]');
+    await panel.waitForFunction(() => !document.querySelector('#fillCard .busy') && !!document.querySelector('#fillCard .summary'), { timeout: 60000 });
+    check('contexte absent après rechargement extension : réinjection sans perte', (await site.evaluate(() => window.unsavedTrial)) === 'ne pas perdre' && (await site.evaluate(() => skillFixture.selected())).length === 4);
+    check('panneau : Location vide rempli depuis le profil et enregistré', (await site.$eval('#workExperience-1--location', (e) => e.value)) === 'Montréal' && (await site.evaluate(() => Mock.model['experience-location'])) === 'Montréal');
+
     // Lettre : écrite via l'API (sans IA), puis modifiée dans le panneau.
     const apiBase = `http://127.0.0.1:${API_PORT}`;
     const appId = (await fetch(`${apiBase}/applications`).then((r) => r.json())).applications[0].id;
@@ -255,7 +299,13 @@ async function main() {
     check('texte de la lettre + signature collés', pasted.includes('Premier paragraphe') && pasted.trim().endsWith('Marie Tremblay'));
     check('formulaire générique jamais soumis', !(await site.evaluate(() => window.submitted)));
 
-    // Soumission → journal.
+    // Ce bouton ne soumet rien : le journal ne change qu'après confirmation explicite.
+    panel.once('dialog', (dialog) => dialog.dismiss());
+    await panel.click('[data-action="submitted"]');
+    await sleep(250);
+    const unsubmitted = (await fetch(`${apiBase}/applications/${appId}`).then((r) => r.json())).application;
+    check('annuler le marquage garde la candidature en cours', unsubmitted.status === 'en cours' && unsubmitted.submittedAt === null);
+    panel.once('dialog', (dialog) => dialog.accept());
     await panel.click('[data-action="submitted"]');
     await sleep(800);
     const { applications } = await fetch(`http://127.0.0.1:${API_PORT}/applications`).then((r) => r.json());

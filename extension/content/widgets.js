@@ -175,7 +175,10 @@
   // ----- Listes déroulantes ARIA (boutons Workday « Sélectionner ») -----
   const visibleListboxes = () => [...document.querySelectorAll('[role="listbox"]')].filter(AP.isVisible);
   const listOptions = (list) => [...list.querySelectorAll('[role="option"]')].filter(AP.isVisible);
-  const optText = (o) => o.getAttribute('data-automation-label') || AP.textOf(o);
+  const optText = (o) => {
+    const label = o.querySelector?.('[data-automation-id="promptOption"]');
+    return o.getAttribute('data-automation-label') || label?.getAttribute('data-automation-label') || AP.textOf(label || o);
+  };
 
   function controlled(btn) {
     const id = btn.getAttribute('aria-controls') || btn.getAttribute('aria-owns');
@@ -272,82 +275,133 @@
   }
 
   // ----- Champs « prompt » Workday (recherche + sélection) et combobox ARIA -----
-  function promptOptions() {
-    return [...document.querySelectorAll('[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"], [role="option"]')].filter(AP.isVisible);
+  /** React peut recréer l'input (et les pastilles) après chaque sélection. */
+  function refreshPrompt(d) {
+    let input = d.htmlId && document.getElementById(d.htmlId);
+    if (!input && d.container?.isConnected) {
+      input = d.container.querySelector('input[data-uxi-widget-type="selectinput"], input[role="combobox"], input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])');
+    }
+    if (!input && d.el?.isConnected) input = d.el;
+    if (!input) return null;
+    d.el = input;
+    if (!d.container?.isConnected) {
+      d.container = input.closest('[data-automation-id^="formField"], [data-automation-id="multiSelectContainer"]') || input.parentElement;
+    }
+    if (!input.hasAttribute('data-applypilot-id')) input.setAttribute('data-applypilot-id', d.id);
+    return input;
   }
 
-  function promptSelected(d, wants) {
-    const items = AP.selectedPromptItems(d.container);
-    return items.some((t) => AP.bestMatch([t], wants, (x) => x).score >= 0.8);
+  function promptOptions(d, before = new Set()) {
+    const input = refreshPrompt(d);
+    if (!input) return [];
+    const list = controlled(input);
+    const owner = input.getAttribute('data-uxi-multiselect-id');
+    const items = new Set();
+    for (const el of document.querySelectorAll('[data-automation-id="promptOption"], [data-automation-id="promptLeafNode"], [role="option"]')) {
+      // Les pastilles utilisent aussi promptOption. Ce ne sont pas des résultats de recherche.
+      if (el.closest('[data-automation-id="selectedItemList"], [data-automation-id="selectedItem"]')) continue;
+      // Workday : le onClick est sur promptLeafNode, pas sur son wrapper role=option.
+      const option = el.closest('[data-automation-id="promptLeafNode"]') || el.querySelector('[data-automation-id="promptLeafNode"]') || el.closest('[role="option"]') || el;
+      if (!AP.isVisible(option) || option.matches('[aria-disabled="true"], :disabled')) continue;
+      const optionOwner = option.closest('[data-uxi-multiselect-id]')?.getAttribute('data-uxi-multiselect-id');
+      if (owner && optionOwner && owner !== optionOwner) continue;
+      if (list && !list.contains(option)) continue;
+      const popup = option.closest('[role="listbox"]');
+      if (!list && !(owner && owner === optionOwner) && popup && before.has(popup) && !d.container.contains(popup)) continue;
+      items.add(option);
+    }
+    return [...items];
+  }
+
+  function selectedPrompt(d, wants) {
+    refreshPrompt(d);
+    return AP.selectedPromptItems(d.container).find((t) => AP.bestMatch([t], wants, (x) => x).score >= 0.8) || null;
+  }
+
+  async function expandPromptSelections(d) {
+    refreshPrompt(d);
+    // Workday replie la liste au-delà de cinq éléments. Il faut la déplier pour vérifier les suivants.
+    const more = d.container?.querySelector('[data-automation-id="wd-MoreLink"][data-automation-morelinkexpanded="false"] [data-automation-id="moreLinkLabel"]');
+    if (more && AP.isVisible(more)) {
+      AP.click(more);
+      await AP.sleep(120);
+      refreshPrompt(d);
+    }
+  }
+
+  async function waitForPromptSelection(d, wants) {
+    const start = Date.now();
+    do {
+      await expandPromptSelections(d);
+      const selected = selectedPrompt(d, wants);
+      if (selected) return selected;
+      await AP.sleep(80);
+    } while (Date.now() - start < 1400);
+    return null;
   }
 
   async function clearInput(input) {
+    if (!input?.isConnected) return;
     AP.setNativeValue(input, '');
-    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'deleteContentBackward' }));
     await AP.press(input, 'Escape');
   }
 
   async function searchAndPick(d, query, wants) {
-    const input = d.el;
+    let input = refreshPrompt(d);
+    if (!input) return null;
+    const before = new Set(visibleListboxes());
     AP.click(input);
-    await AP.typeText(input, query);
-    await AP.press(input, 'Enter');
-    const opts = await AP.waitFor(promptOptions, { timeout: 3500 });
-    if (!opts) {
-      await clearInput(input);
+    input = refreshPrompt(d);
+    if (!input) return null;
+    await AP.typeText(input, query, { delay: 5 });
+    await AP.press(refreshPrompt(d) || input, 'Enter');
+    // Attendre une correspondance, pas simplement n'importe quelle option d'une autre liste.
+    const match = await AP.waitFor(() => {
+      const m = AP.bestMatch(promptOptions(d, before), wants, optText);
+      return m.option && m.score >= MIN_SCORE ? m : null;
+    }, { timeout: 3500 });
+    if (!match) {
+      await clearInput(refreshPrompt(d));
       return null;
     }
-    const { option, score } = AP.bestMatch(opts, wants, optText);
-    if (!option || score < MIN_SCORE) {
-      await clearInput(input);
-      return null;
-    }
-    const chosen = optText(option);
-    AP.click(option);
-    await AP.sleep(450);
-    if (!promptSelected(d, wants)) {
-      // Catégorie hiérarchique : un second niveau d'options apparaît.
-      const sub = promptOptions();
-      const m = sub.length ? AP.bestMatch(sub, wants, optText) : { option: null, score: 0 };
-      if (m.option && m.score >= MIN_SCORE && m.option !== option) {
-        AP.click(m.option);
-        await AP.sleep(450);
-      } else {
-        const inner = option.querySelector?.('input[type="radio"], input[type="checkbox"]');
-        if (inner && !inner.checked) {
-          AP.click(inner);
-          await AP.sleep(300);
-        }
+    const option = match.option;
+    const alreadyChecked = option.getAttribute('data-automation-checked') === 'Checked' || option.getAttribute('data-uxi-multiselectlistitem-isselected') === 'true';
+    if (!alreadyChecked) AP.click(option);
+    let selected = await waitForPromptSelection(d, wants);
+    if (selected) return selected;
+    if (!alreadyChecked) {
+      // Catégorie hiérarchique ou composant dont seul le contrôle intérieur sélectionne.
+      const sub = AP.bestMatch(promptOptions(d, before), wants, optText);
+      if (sub.option && sub.score >= MIN_SCORE && sub.option !== option) AP.click(sub.option);
+      else {
+        const inner = option.isConnected && option.querySelector('input[type="radio"], input[type="checkbox"], [role="checkbox"]');
+        if (inner && !inner.checked && inner.getAttribute('aria-checked') !== 'true') AP.click(inner);
+        else { await clearInput(refreshPrompt(d)); return null; }
       }
+      selected = await waitForPromptSelection(d, wants);
     }
-    return chosen;
+    if (!selected) await clearInput(refreshPrompt(d));
+    return selected; // un clic ou du texte tapé n'est jamais une preuve de sélection
   }
 
   async function fillPrompt(d, result) {
     const targets = result.multi && Array.isArray(result.value) ? result.value.map((v) => [v]) : [wantsOf(result)];
-    const picked = [];
-    const missed = [];
     for (const wants of targets) {
-      if (promptSelected(d, wants)) {
-        picked.push(wants[0]);
-        continue;
-      }
-      let chosen = null;
+      await expandPromptSelections(d);
+      if (selectedPrompt(d, wants)) continue; // garder les choix existants, sans les recocher/décocher
       for (const q of wants.slice(0, 3)) {
-        chosen = await searchAndPick(d, q, wants);
-        if (chosen) break;
+        if (await searchAndPick(d, q, wants)) break;
       }
-      if (chosen) picked.push(chosen);
-      else missed.push(wants[0]);
     }
-    await AP.press(d.el, 'Escape');
-    if (!picked.length) return { status: 'fail', note: `Introuvable dans la liste : ${missed.slice(0, 3).join(', ')}` };
-    const confirmed = targets.every((w) => promptSelected(d, w));
-    return {
-      status: confirmed && !missed.length ? 'ok' : 'check',
-      value: picked.join(', '),
-      note: missed.length ? `Non trouvés : ${missed.slice(0, 5).join(', ')}` : confirmed ? '' : 'Sélection à confirmer',
-    };
+    await clearInput(refreshPrompt(d));
+    await AP.sleep(120);
+    await expandPromptSelections(d);
+    const picked = targets.map((w) => selectedPrompt(d, w)).filter(Boolean);
+    const missed = targets.filter((w) => !selectedPrompt(d, w)).map((w) => w[0]);
+    const note = missed.length ? `Non sélectionnés : ${missed.slice(0, 5).join(', ')}` : '';
+    if (!picked.length) return { status: 'fail', note };
+    return { status: missed.length ? 'check' : 'ok', value: [...new Set(picked)].join(', '), note };
   }
 
   function comboOptions(input) {

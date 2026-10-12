@@ -261,10 +261,14 @@
 
   function selectedPromptItems(container) {
     if (!container) return [];
-    const items = container.querySelectorAll(
-      '[data-automation-id="selectedItem"], [data-automation-id="selectedItemList"] [role="listitem"], [data-automation-id="promptSelectionLabel"], [data-automation-id="multiselectInputContainer"] [role="listitem"]',
-    );
-    return [...items].map((n) => n.getAttribute('title') || AP.textOf(n)).filter(Boolean);
+    const items = [...container.querySelectorAll(
+      '[data-automation-id="selectedItem"], [data-automation-id="selectedItemList"] [role="listitem"], [data-automation-id="selectedItemList"] [data-uxi-widget-type="selectinputlistitem"], [data-automation-id="selectedItemList"] [data-automation-id="promptSelectionLabel"], [data-automation-id="multiselectInputContainer"] [role="listitem"]',
+    )];
+    // Le texte du bouton de suppression ne fait pas partie de la compétence ; éviter les doublons parent/enfant.
+    return [...new Set(items.filter((n) => !items.some((other) => other !== n && n.contains(other))).map((n) => {
+      const label = n.querySelector('[data-automation-id="promptOption"]');
+      return label?.getAttribute('data-automation-label') || AP.textOf(label) || n.getAttribute('title') || AP.textOf(n);
+    }).filter(Boolean))];
   }
 
   function currentValue(d) {

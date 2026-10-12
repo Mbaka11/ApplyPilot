@@ -366,7 +366,7 @@ async function captureMemory({ quiet = false } = {}) {
 }
 
 async function markSubmitted() {
-  if (!S.app) return;
+  if (!S.app || !confirm('As-tu déjà envoyé la candidature sur le site de l’employeur et reçu sa confirmation ?\n\nCe bouton met seulement à jour ton journal : il ne soumet pas le formulaire.')) return;
   try {
     await captureMemory({ quiet: true });
   } catch {

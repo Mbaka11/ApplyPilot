@@ -277,6 +277,8 @@ Posting End Date 2026-10-14`,
 
     const patch = await api('PATCH', `/applications/${app.id}`, { status: 'soumise' });
     check('statut « soumise »', patch.data.application?.status === 'soumise' && !!patch.data.application?.submittedAt);
+    const resumed = await api('PATCH', `/applications/${app.id}`, { status: 'en cours' });
+    check('marquage annulé : en cours sans fausse date de soumission', resumed.data.application?.status === 'en cours' && resumed.data.application?.submittedAt === null);
     const csv = await api('GET', '/journal.csv');
     check('journal CSV', csv.status === 200 && csv.data.toString('utf8').includes('Nordique Analytique'));
 

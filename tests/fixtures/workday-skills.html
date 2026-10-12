@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workday — Skills: leaf click and asynchronous selections</title>
+<style>
+  body { font: 14px sans-serif; padding: 20px; }
+  [data-automation-id^="formField"] { margin: 10px 0; }
+  label { display: block; font-weight: 600; }
+  [data-automation-id="selectedItemList"] { padding: 0; }
+  [data-automation-id="selectedItemList"] > li { display: inline-block; padding: 5px; background: #eee; margin: 2px; }
+  .popup { position: fixed; top: 220px; left: 400px; background: white; border: 1px solid #999; z-index: 10; padding: 8px; }
+  [data-automation-id="promptLeafNode"] { padding: 6px; cursor: pointer; }
+  #other-options { top: 500px; }
+</style>
+<script src="mock.js"></script>
+</head>
+<body>
+<div data-automation-id="applyFlowPage">
+  <div data-automation-id="progressBarActiveStep">current step 2 of 5 My Experience</div>
+  <section data-automation-id="workExperienceSection">
+    <h3>Work Experience</h3>
+    <div role="group" aria-labelledby="work-1">
+      <h4 id="work-1">Work Experience 1</h4>
+      <div data-automation-id="formField-location"><label for="workExperience-1--location">Location</label><input id="workExperience-1--location"></div>
+    </div>
+  </section>
+  <div data-automation-id="formField-city"><label for="home-city">City</label><input id="home-city"></div>
+  <section data-automation-id="skillsSection">
+    <h3>Skills</h3>
+    <div data-automation-id="formField-skills" id="skills-field"></div>
+  </section>
+  <button type="button" id="next">Save and Continue</button>
+  <button type="button" id="submit">Submit</button>
+</div>
+<script>
+(() => {
+  const field = document.getElementById('skills-field');
+  const owner = 'skills-widget';
+  const choices = ['Python (Programming Language)', 'PyTorch (Machine Learning Library)', 'SQL (Programming Language)', 'C++ (Programming Language)', 'Git', 'Uncommitted'];
+  let selected = [];
+  let expanded = false;
+  let active = false;
+  let generation = 0;
+  let popup = null;
+  let query = '';
+  let touched = [];
+  window.navigationClicks = 0;
+  document.getElementById('next').onclick = document.getElementById('submit').onclick = () => window.navigationClicks++;
+  Mock.committed(document.getElementById('workExperience-1--location'), 'experience-location');
+  Mock.committed(document.getElementById('home-city'), 'home-city');
+
+  function close() {
+    generation++;
+    popup?.remove();
+    popup = null;
+    const input = field.querySelector('input');
+    input?.removeAttribute('aria-controls');
+    input?.setAttribute('aria-expanded', 'false');
+  }
+
+  function render() {
+    active = false;
+    field.innerHTML = '';
+    const label = document.createElement('label');
+    label.htmlFor = 'skills-input';
+    label.textContent = 'Type to Add Skills';
+    field.appendChild(label);
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('data-automation-id', 'multiSelectContainer');
+    wrapper.setAttribute('data-uxi-widget-type', 'multiselect');
+    wrapper.id = owner;
+    const inner = document.createElement('div');
+    inner.setAttribute('data-automation-id', 'multiselectInputContainer');
+    const list = document.createElement('ul');
+    list.setAttribute('data-automation-id', 'selectedItemList');
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', 'items selected');
+    for (const text of expanded ? selected : selected.slice(0, 3)) {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'presentation');
+      li.setAttribute('data-automation-id', 'menuItem');
+      li.setAttribute('data-uxi-widget-type', 'selectinputlistitem');
+      const pill = document.createElement('div');
+      pill.setAttribute('data-automation-id', 'selectedItem');
+      const name = document.createElement('span');
+      name.setAttribute('data-automation-id', 'promptOption');
+      name.setAttribute('data-automation-label', text);
+      name.textContent = text;
+      pill.appendChild(name);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.setAttribute('data-automation-id', 'DELETE_charm');
+      remove.textContent = 'Delete';
+      remove.onclick = () => { selected = selected.filter((x) => x !== text); render(); };
+      pill.appendChild(remove);
+      li.appendChild(pill);
+      list.appendChild(li);
+    }
+    if (selected.length > 3 && !expanded) {
+      const more = document.createElement('div');
+      more.setAttribute('data-automation-id', 'wd-MoreLink');
+      more.setAttribute('data-automation-morelinkexpanded', 'false');
+      const button = document.createElement('span');
+      button.setAttribute('data-automation-id', 'moreLinkLabel');
+      button.setAttribute('role', 'button');
+      button.textContent = 'More';
+      button.onmousedown = (e) => e.preventDefault();
+      button.onclick = () => { expanded = true; render(); };
+      more.appendChild(button);
+      list.appendChild(more);
+    }
+    inner.appendChild(list);
+    const input = document.createElement('input');
+    input.id = 'skills-input';
+    input.placeholder = 'Type to Add Skills';
+    input.value = query;
+    input.setAttribute('data-uxi-widget-type', 'selectinput');
+    input.setAttribute('data-uxi-multiselect-id', owner);
+    input.setAttribute('aria-expanded', 'false');
+    input.addEventListener('focusin', () => { active = true; });
+    input.addEventListener('focusout', () => { active = false; });
+    input.addEventListener('input', () => { query = input.value; });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { close(); return; }
+      if (e.key !== 'Enter' || !active || e.keyCode !== 13) return;
+      e.preventDefault();
+      close();
+      const g = generation;
+      const q = query.toLowerCase();
+      setTimeout(() => {
+        if (g !== generation) return;
+        popup = document.createElement('div');
+        popup.className = 'popup';
+        popup.id = 'skills-results';
+        popup.setAttribute('role', 'listbox');
+        popup.setAttribute('data-automation-id', 'activeListContainer');
+        popup.setAttribute('data-uxi-multiselect-id', owner);
+        input.setAttribute('aria-controls', popup.id);
+        input.setAttribute('aria-expanded', 'true');
+        for (const text of choices.filter((s) => s.toLowerCase().includes(q))) {
+          // Structure du composant public Workday : role=option englobe le promptLeafNode,
+          // dont le gestionnaire click porte la sélection. Le wrapper ne fait que surligner.
+          const row = document.createElement('div');
+          row.tabIndex = -1;
+          row.setAttribute('role', 'option');
+          row.setAttribute('data-automation-id', 'menuItem');
+          row.setAttribute('aria-selected', 'true'); // surligné n'est PAS sélectionné
+          const leaf = document.createElement('div');
+          leaf.tabIndex = -1;
+          leaf.setAttribute('data-automation-id', 'promptLeafNode');
+          leaf.setAttribute('data-uxi-multiselect-id', owner);
+          const name = document.createElement('span');
+          name.setAttribute('data-automation-id', 'promptOption');
+          name.setAttribute('data-automation-label', text);
+          name.textContent = text;
+          leaf.appendChild(name);
+          leaf.onclick = () => {
+            touched.push(text);
+            if (text === 'Uncommitted') return; // clic sans persistance : ne jamais annoncer un succès
+            const token = generation;
+            setTimeout(() => {
+              if (token !== generation) return;
+              if (!selected.includes(text)) selected.push(text);
+              query = '';
+              expanded = false;
+              close();
+              render(); // comme React : les anciennes références input/list deviennent obsolètes
+            }, 240);
+          };
+          row.appendChild(leaf);
+          popup.appendChild(row);
+        }
+        document.body.appendChild(popup);
+      }, 180);
+    });
+    inner.appendChild(input);
+    wrapper.appendChild(inner);
+    field.appendChild(wrapper);
+  }
+
+  // Une autre liste ouverte contient la même option : elle ne doit jamais recevoir les clics.
+  const other = document.createElement('div');
+  other.className = 'popup';
+  other.id = 'other-options';
+  other.setAttribute('role', 'listbox');
+  other.setAttribute('data-uxi-multiselect-id', 'other-widget');
+  other.innerHTML = '<div data-automation-id="promptLeafNode" data-uxi-multiselect-id="other-widget"><span data-automation-id="promptOption" data-automation-label="Python">Python</span></div>';
+  window.unrelatedClicks = 0;
+  other.onclick = () => window.unrelatedClicks++;
+  document.body.appendChild(other);
+
+  window.skillFixture = {
+    selected: () => [...selected],
+    touched: () => [...touched],
+    seed: (values) => { close(); selected = [...values]; query = ''; expanded = false; render(); },
+    resetTouches: () => { touched = []; },
+  };
+  render();
+})();
+</script>
+</body>
+</html>

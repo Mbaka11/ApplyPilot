@@ -56,7 +56,7 @@
 
   /** b est préfixe de a, et s'arrête sur une frontière de mot. */
   function boundaryPrefix(a, b) {
-    return a.startsWith(b) && (a.length === b.length || !/[a-z0-9]/.test(a[b.length]));
+    return a.startsWith(b) && (a.length === b.length || !/[a-z0-9+#]/.test(a[b.length]));
   }
 
   /** Similarité 0..1 entre deux libellés (accents, casse et ponctuation ignorés). */

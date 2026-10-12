@@ -192,6 +192,54 @@ async function main() {
     const uploaded2 = await page.$$eval('#uploaded li', (els) => els.length);
     const groups2 = await page.$$eval('[role="group"]', (els) => els.length);
     check('2e remplissage : pas de doublon (fichiers, blocs)', uploaded2 === 2 && groups2 === 4, `${uploaded2} fichiers, ${groups2} blocs`);
+    console.log('Workday — compétences : vraies cibles de clic, options différées et input recréé');
+    await load(page, 'workday-skills.html');
+    await front.bringToFront();
+    const strictPayload = { ...PAYLOAD, profile: {
+      ...PROFILE,
+      identity: { ...PROFILE.identity, address: { ...PROFILE.identity.address, city: 'Laval' } },
+      experience: [{ ...PROFILE.experience[0], location: 'Montréal' }],
+      skills: ['Python', 'PyTorch', 'SQL', 'C++'],
+    } };
+    const strict = await run(page, 'fill', strictPayload);
+    const strictSkills = await page.evaluate(() => skillFixture.selected());
+    check('Location professionnel = Montréal, ville personnelle = Laval',
+      (await val(page, '#workExperience-1--location')) === 'Montréal' && (await val(page, '#home-city')) === 'Laval');
+    const locationModel = await page.evaluate(() => Mock.model);
+    check('les deux lieux sont enregistrés au blur sans clic manuel', locationModel['experience-location'] === 'Montréal' && locationModel['home-city'] === 'Laval');
+    check('4 compétences persistantes après les clics sur les feuilles, pas les wrappers', strictSkills.length === 4 && strictSkills.includes('C++ (Programming Language)'), strictSkills.join(' | '));
+    const skillResults = strict.results.filter((r) => /skills/i.test(r.label));
+    check('compétences vérifiées malgré les rerenders et les pastilles repliées', skillResults.length === 1 && skillResults.every((r) => r.status === 'check' && !/confirmer|non sélectionn|non trouv|introuvable/i.test(r.note)), JSON.stringify(skillResults));
+    check('aucune option prise dans une autre liste ouverte', (await page.evaluate(() => window.unrelatedClicks)) === 0);
+    check('C++ ne correspond pas à C ou C#', (await page.evaluate(() => [ApplyPilot.similarity('C++', 'C'), ApplyPilot.similarity('C++', 'C#')])).every((s) => s < 0.6));
+    await page.evaluate(() => { skillFixture.seed(['Git', 'Python (Programming Language)']); skillFixture.resetTouches(); document.getElementById('workExperience-1--location').value = 'Toronto'; });
+    await run(page, 'fill', strictPayload);
+    const added = await page.evaluate(() => ({ selected: skillFixture.selected(), touched: skillFixture.touched() }));
+    check('sélections existantes conservées, compétences manquantes ajoutées sans écraser', added.selected.length === 5 && added.selected.includes('Git') && !added.touched.includes('Python (Programming Language)'), JSON.stringify(added));
+    check('lieu déjà corrigé par l’utilisateur conservé', (await val(page, '#workExperience-1--location')) === 'Toronto');
+    await run(page, 'fill', strictPayload);
+    check('3e remplissage : aucune compétence en double', (await page.evaluate(() => skillFixture.selected())).length === 5);
+    const ignored = await page.evaluate(async () => {
+      const d = ApplyPilot.scanFields().find((f) => /skills/i.test(f.label));
+      return ApplyPilot.fillField(d, { value: ['Python', 'Uncommitted'], multi: true }, ApplyPilot.makeContext({}));
+    });
+    check('un clic sans pastille reste un échec partiel, jamais une réussite annoncée', ignored.status === 'check' && !/Uncommitted/.test(ignored.value || '') && /Uncommitted/.test(ignored.note || ''), JSON.stringify(ignored));
+    await page.evaluate(() => {
+      skillFixture.seed([]);
+      const announcement = document.createElement('span');
+      announcement.setAttribute('data-automation-id', 'promptSelectionLabel');
+      announcement.setAttribute('aria-live', 'polite');
+      announcement.style.display = 'none';
+      announcement.textContent = 'Uncommitted';
+      document.getElementById('skills-field').appendChild(announcement);
+    });
+    const onlyIgnored = await run(page, 'fill', { ...strictPayload, profile: { ...strictPayload.profile, skills: ['Uncommitted'] } });
+    const ignoredResult = onlyIgnored.results.find((r) => /skills/i.test(r.label));
+    check('aucune sélection persistante : échec explicite, pas de faux texte rempli', ignoredResult?.status === 'fail' && !ignoredResult?.value, JSON.stringify(ignoredResult));
+    check('annonce ARIA cachée non confondue avec une pastille', (await page.evaluate(() => ApplyPilot.selectedPromptItems(document.getElementById('skills-field')))).length === 0);
+    check('un échec de widget skills ne déclenche pas une invention par l’IA', !onlyIgnored.unresolved.some((f) => /skills/i.test(f.label)));
+    check('aucun bouton Suivant ou Soumettre cliqué', (await page.evaluate(() => window.navigationClicks)) === 0);
+
     console.log('Workday — Langues et sites Web (page en arrière-plan, listes Canvas Kit)');
     await load(page, 'workday-langues.html');
     const r5 = await run(page, 'fill', PAYLOAD);

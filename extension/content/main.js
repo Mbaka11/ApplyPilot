@@ -1,7 +1,7 @@
 // ApplyPilot — point d'entrée des scripts de contenu : commandes appelées par le panneau latéral.
 (() => {
   const AP = globalThis.ApplyPilot;
-  AP.VERSION = '0.3.0';
+  AP.VERSION = '0.3.1';
   AP.frameToken = AP.frameToken || Math.random().toString(36).slice(2, 6);
 
   const CHOICE = new Set(['select', 'radio', 'dropdown', 'prompt', 'combobox', 'checkboxes']);
@@ -93,7 +93,8 @@
         if (!r) res = { status: 'unresolved' };
         else if (r.skip) res = { status: r.status || 'skip', note: r.note };
         else if (r.missing) res = { status: 'todo', note: r.note };
-        else if (!d.isEmpty && !ctx.options.overwrite && d.kind !== 'file' && d.kind !== 'checkbox') {
+        else if (!d.isEmpty && !ctx.options.overwrite && d.kind !== 'file' && d.kind !== 'checkbox' &&
+          !(r.multi && Array.isArray(r.value) && ['prompt', 'checkboxes', 'select'].includes(d.kind))) {
           res = { status: 'kept', value: d.value, note: 'Déjà rempli (non modifié)' };
         } else {
           try {
@@ -106,7 +107,7 @@
           res.note = res.note || r.note || '';
           acted++;
         }
-        results.set(d.id, { d, ...res });
+        results.set(d.id, { d, ...res, ruleId: r?.ruleId });
       }
       AP.releaseFocus(); // dernier champ validé avant de rescanner (Workday enregistre au blur)
       if (!acted) break;
@@ -116,7 +117,7 @@
     const unresolved = [];
     let probes = 0;
     for (const r of results.values()) {
-      const choiceFail = r.status === 'fail' && CHOICE.has(r.d.kind);
+      const choiceFail = r.status === 'fail' && CHOICE.has(r.d.kind) && r.ruleId !== 'skills';
       if (r.status !== 'unresolved' && !choiceFail) continue;
       if (!r.d.el.isConnected) continue;
       if (r.options?.length) r.d.options = r.options;
