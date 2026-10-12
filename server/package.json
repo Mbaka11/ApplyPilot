@@ -1,8 +1,8 @@
 {
   "name": "applypilot-server",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
-  "description": "Serveur local d'ApplyPilot : profil, CV, lettres de motivation (via pi) et journal des candidatures.",
+  "description": "ApplyPilot local server: profiles, CVs, pi-generated cover letters, PDFs and application tracking.",
   "type": "module",
   "main": "src/index.js",
   "engines": {
@@ -10,7 +10,11 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node ../tests/server.test.mjs && node ../tests/content.test.mjs && node ../tests/e2e.test.mjs",
+    "test": "node ../tests/version.test.mjs && node ../tests/i18n.test.mjs && node ../tests/llm.test.mjs && node ../tests/server.test.mjs && node ../tests/content.test.mjs && node ../tests/e2e.test.mjs",
+    "test:version": "node ../tests/version.test.mjs",
+    "test:i18n": "node ../tests/i18n.test.mjs",
+    "test:llm": "node ../tests/llm.test.mjs",
+    "version:check": "node ../scripts/version.mjs check",
     "test:server": "node ../tests/server.test.mjs",
     "test:content": "node ../tests/content.test.mjs",
     "test:e2e": "node ../tests/e2e.test.mjs",

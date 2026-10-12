@@ -108,7 +108,7 @@ async function main() {
   prepareFixtures();
   const srv = spawn(process.execPath, ['server/src/index.js'], {
     cwd: ROOT,
-    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA, APPLYPILOT_PROFILE: TEST_PROFILE, APPLYPILOT_CONFIG: TEST_CONFIG, APPLYPILOT_CV_DIR: path.join(OUT, 'cvs') },
+    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA, APPLYPILOT_PROFILE: TEST_PROFILE, APPLYPILOT_CONFIG: TEST_CONFIG, APPLYPILOT_CV_DIR: path.join(OUT, 'cvs'), APPLYPILOT_FAKE_PI_DIR: path.join(OUT, 'fake-pi') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';
@@ -288,6 +288,36 @@ Posting End Date 2026-10-14`,
     });
     const memGet = await api('GET', '/memory');
     check('mémoire des réponses', mem.data.added === 1 && !!memGet.data.items['how did you hear about us']);
+
+    console.log('Cancellation — HTTP disconnect must stop pi (fake CLI, no provider quota)');
+    const originalConfig = fs.readFileSync(TEST_CONFIG, 'utf8');
+    const markerDir = path.join(OUT, 'fake-pi');
+    fs.appendFileSync(TEST_CONFIG, `llm:\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`);
+    const controller = new AbortController();
+    let cancelledPid;
+    try {
+      const waiting = fetch(BASE + '/answers', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify({ fields: [{ id: 'q-cancel', label: 'Why this internship?', kind: 'textarea' }] }),
+      }).catch((error) => error);
+      for (let i = 0; i < 100 && !cancelledPid; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        const marker = fs.existsSync(markerDir) && fs.readdirSync(markerDir)[0];
+        if (marker) cancelledPid = JSON.parse(fs.readFileSync(path.join(markerDir, marker), 'utf8')).pid;
+      }
+      check('answer request starts only the configured fake CLI', !!cancelledPid);
+      controller.abort();
+      check('client request is cancellable', (await waiting).name === 'AbortError');
+      const alive = () => { try { process.kill(cancelledPid, 0); return true; } catch { return false; } };
+      for (let i = 0; i < 100 && cancelledPid && alive(); i++) await new Promise((r) => setTimeout(r, 50));
+      check('HTTP disconnect terminates pi, not just the spinner', !!cancelledPid && !alive());
+      check('server remains responsive after cancellation', (await api('GET', '/health')).status === 200);
+      const afterCancellation = await api('GET', `/applications/${app.id}`);
+      check('cancellation does not modify the application or its letter', afterCancellation.data.application.status === 'en cours' && afterCancellation.data.application.letter.body === SAMPLE_BODY);
+    } finally {
+      controller.abort();
+      fs.writeFileSync(TEST_CONFIG, originalConfig);
+    }
 
     if (WITH_LLM) {
       console.log('IA (pi) — peut prendre 1 à 2 minutes');

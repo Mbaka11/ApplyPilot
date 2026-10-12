@@ -1,8 +1,29 @@
 // ApplyPilot — point d'entrée des scripts de contenu : commandes appelées par le panneau latéral.
 (() => {
   const AP = globalThis.ApplyPilot;
-  AP.VERSION = '0.3.1';
+  AP.VERSION = '0.4.0';
   AP.frameToken = AP.frameToken || Math.random().toString(36).slice(2, 6);
+
+  AP.cancelledRuns = AP.cancelledRuns || new Set();
+  const cancelledError = () => Object.assign(new Error('Remplissage arrêté ou étape changée'), { name: 'AbortError' });
+
+  function pageIdentity() {
+    const step = AP.platform() === 'workday' ? AP.workday.currentStep() : null;
+    const heading = step?.name || AP.textOf(document.querySelector('main h1, main h2, form h1, form h2, h1, h2'));
+    return JSON.stringify([location.href, step?.index ?? null, heading]);
+  }
+
+  function fillContext(payload) {
+    const token = { id: payload.runId || Math.random().toString(36), cancelled: false, page: payload.expectedPage || pageIdentity() };
+    if (AP.activeFill) AP.activeFill.cancelled = true;
+    AP.activeFill = token;
+    const ctx = AP.makeContext(payload);
+    ctx.checkpoint = () => {
+      if (token.cancelled || AP.activeFill !== token || AP.cancelledRuns.has(token.id) || pageIdentity() !== token.page) throw cancelledError();
+    };
+    ctx.checkpoint();
+    return ctx;
+  }
 
   const CHOICE = new Set(['select', 'radio', 'dropdown', 'prompt', 'combobox', 'checkboxes']);
   const hasRuntime = () => {
@@ -37,9 +58,9 @@
     };
   }
 
-  function paint(d, status, note) {
+  function paint(d, status, note, language = 'fr') {
     const map = { ok: 'ok', check: 'check', todo: 'todo', fail: 'todo', unresolved: 'todo' };
-    if (map[status]) AP.highlight(d.container || d.el, map[status], note);
+    if (map[status]) AP.highlight(d.container || d.el, map[status], globalThis.ApplyPilotI18n?.translate(note, language) ?? note);
   }
 
   function detect() {
@@ -52,6 +73,7 @@
       title: q.title,
       company: q.company,
       jobKey: AP.jobKey(),
+      pageIdentity: pageIdentity(),
       fieldCount: fields.filter((f) => f.kind !== 'file').length,
       fileCount: fields.filter((f) => f.kind === 'file').length,
       step: plat === 'workday' ? AP.workday.currentStep() : null,
@@ -63,19 +85,21 @@
   async function fillPage(payload) {
     AP.usedHere = true;
     AP.lastPayload = payload;
-    const ctx = AP.makeContext(payload);
+    const ctx = fillContext(payload);
     AP.clearHighlights();
     const info = {};
     if (ctx.platform === 'workday') {
       try {
         await AP.workday.preFill(ctx);
       } catch (e) {
+        if (e.name === 'AbortError') throw e;
         console.warn('[ApplyPilot] pays', e);
       }
       if (ctx.options.addEntries !== false) {
         try {
           info.addedEntries = await AP.workday.ensureEntries(ctx);
         } catch (e) {
+          if (e.name === 'AbortError') throw e;
           console.warn('[ApplyPilot] blocs', e);
         }
       }
@@ -83,10 +107,12 @@
 
     const results = new Map();
     for (let pass = 0; pass < 3; pass++) {
+      ctx.checkpoint();
       const fields = AP.scanFields();
       AP.computePageFlags(ctx, fields);
       let acted = 0;
       for (const d of fields) {
+        ctx.checkpoint();
         if (results.has(d.id) && results.get(d.id).status !== 'unresolved') continue;
         const r = AP.resolve(d, ctx);
         let res;
@@ -100,6 +126,7 @@
           try {
             res = await AP.fillField(d, r, ctx);
           } catch (e) {
+            if (e.name === 'AbortError') throw e;
             res = { status: 'fail', note: String(e?.message || e) };
           }
           if (res.status === 'ok' && (r.review || (r.confidence ?? 1) < 0.8)) res.status = 'check';
@@ -117,6 +144,7 @@
     const unresolved = [];
     let probes = 0;
     for (const r of results.values()) {
+      ctx.checkpoint();
       const choiceFail = r.status === 'fail' && CHOICE.has(r.d.kind) && r.ruleId !== 'skills';
       if (r.status !== 'unresolved' && !choiceFail) continue;
       if (!r.d.el.isConnected) continue;
@@ -124,7 +152,7 @@
       if (r.d.kind === 'dropdown' && !r.d.options?.length && probes < 25) {
         probes++;
         try {
-          r.d.options = await AP.probeOptions(r.d);
+          r.d.options = await AP.probeOptions(r.d, ctx);
         } catch {
           r.d.options = [];
         }
@@ -133,9 +161,10 @@
     }
 
     const out = [];
+    ctx.checkpoint();
     for (const [id, r] of results) {
       if (r.status === 'skip' && !r.note) continue;
-      paint(r.d, r.status, r.note);
+      paint(r.d, r.status, r.note, ctx.options.uiLanguage || ctx.lang);
       out.push(serializeResult(id, r));
     }
     return {
@@ -149,12 +178,13 @@
 
   /** Applique les réponses de l'IA (toujours marquées « à vérifier »). */
   async function fillValues(payload) {
-    const ctx = AP.makeContext(payload);
+    const ctx = fillContext(payload);
     const fields = AP.scanFields();
     AP.computePageFlags(ctx, fields);
     const byId = new Map(fields.map((f) => [f.id, f]));
     const out = [];
     for (const [id, a] of Object.entries(payload.answers || {})) {
+      ctx.checkpoint();
       const d = byId.get(id);
       if (!d) continue; // champ d'un autre cadre (iframe)
       let res;
@@ -166,13 +196,15 @@
         try {
           res = await AP.fillField(d, r, ctx);
         } catch (e) {
+          if (e.name === 'AbortError') throw e;
           res = { status: 'fail', note: String(e?.message || e) };
         }
         if (res.status === 'ok') res.status = 'check';
         res.note = a.note || res.note || '';
       }
+      ctx.checkpoint();
       const r = { d, ...res, source: 'ia' };
-      paint(d, r.status, r.note);
+      paint(d, r.status, r.note, ctx.options.uiLanguage || ctx.lang);
       out.push(serializeResult(id, r));
     }
     AP.releaseFocus();
@@ -235,6 +267,16 @@
           return { ...base, ...(await fillPage(payload)) };
         case 'fillValues':
           return { ...base, ...(await fillValues(payload)) };
+        case 'cancel':
+          if (payload.runId) {
+            AP.cancelledRuns.add(payload.runId);
+            if (AP.cancelledRuns.size > 64) AP.cancelledRuns.delete(AP.cancelledRuns.values().next().value);
+          }
+          if (AP.activeFill && (!payload.runId || AP.activeFill.id === payload.runId)) {
+            AP.activeFill.cancelled = true;
+            AP.releaseFocus();
+          }
+          return { ...base, cancelled: true };
         case 'capture':
           return { ...base, items: captureAnswers() };
         case 'focus':
@@ -246,6 +288,7 @@
           return { ...base, error: `Commande inconnue : ${cmd}` };
       }
     } catch (e) {
+      if (e.name === 'AbortError') return { ...base, cancelled: true };
       return { ...base, error: String(e?.stack || e) };
     }
   }
@@ -261,6 +304,11 @@
     const aid = btn.getAttribute('data-automation-id') || '';
     const t = AP.norm(AP.textOf(btn) || btn.value || btn.getAttribute('aria-label') || '');
     if (!NAV_RE.test(t) && !/bottom-navigation-(next|submit)-button|pageFooter(Next|Submit)Button/i.test(aid)) return;
+    if (AP.activeFill && !AP.activeFill.cancelled) {
+      AP.activeFill.cancelled = true;
+      AP.cancelledRuns.add(AP.activeFill.id);
+      chrome.runtime.sendMessage({ type: 'ap:fillCancelled', runId: AP.activeFill.id }).catch(() => {});
+    }
     try {
       const items = captureAnswers();
       if (items.length) chrome.runtime.sendMessage({ type: 'ap:memory', items }).catch(() => {});
@@ -285,7 +333,7 @@
         if (key === last) return;
         last = key;
         try {
-          if (hasRuntime()) chrome.runtime.sendMessage({ type: 'ap:pageChanged', step: s, url: location.href }).catch(() => {});
+          if (hasRuntime()) chrome.runtime.sendMessage({ type: 'ap:pageChanged', step: s, url: location.href, pageIdentity: pageIdentity() }).catch(() => {});
         } catch {
           /* ignore */
         }

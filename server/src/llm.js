@@ -39,12 +39,19 @@ export function resolvePi(cfg) {
   return { file: 'pi', args: [], env: {}, shell: process.platform === 'win32', desc: 'pi (PATH)' };
 }
 
+const activeRuns = new Set();
+const cancelledError = () => Object.assign(new Error('Remplissage arrêté'), { name: 'AbortError', status: 499 });
+export function cancelAllPi() {
+  for (const cancel of [...activeRuns]) cancel();
+}
+
 function killTree(child) {
-  if (!child?.pid) return;
+  if (!child?.pid || child.exitCode !== null) return;
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
   } else {
-    child.kill('SIGTERM');
+    try { process.kill(-child.pid, 'SIGTERM'); } // owned process group, including launchers
+    catch { child.kill('SIGTERM'); }
   }
 }
 
@@ -52,7 +59,8 @@ function killTree(child) {
  * Lance `pi --print` (sans outils, sans session, sans extensions) avec le prompt sur stdin.
  * Retourne le texte final de l'assistant.
  */
-export function runPi(prompt, { cfg, thinking, model, timeoutSeconds } = {}) {
+export function runPi(prompt, { cfg, thinking, model, timeoutSeconds, signal } = {}) {
+  if (signal?.aborted) return Promise.reject(cancelledError());
   const runner = resolvePi(cfg);
   const args = [
     ...runner.args,
@@ -78,16 +86,32 @@ export function runPi(prompt, { cfg, thinking, model, timeoutSeconds } = {}) {
 
   return new Promise((resolve, reject) => {
     const started = Date.now();
-    const child = spawn(runner.file, args, { cwd, env, shell: runner.shell, windowsHide: true });
+    const child = spawn(runner.file, args, { cwd, env, shell: runner.shell, windowsHide: true, detached: process.platform !== 'win32' });
     let out = '';
     let err = '';
     let done = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+      activeRuns.delete(cancel);
+    };
+    const cancel = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      killTree(child);
+      reject(cancelledError());
+    };
     const timer = setTimeout(() => {
       if (done) return;
       done = true;
+      cleanup();
       killTree(child);
       reject(Object.assign(new Error(`pi n’a pas répondu après ${timeoutMs / 1000} s`), { status: 504 }));
     }, timeoutMs);
+    activeRuns.add(cancel);
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -96,13 +120,13 @@ export function runPi(prompt, { cfg, thinking, model, timeoutSeconds } = {}) {
     child.on('error', (e) => {
       if (done) return;
       done = true;
-      clearTimeout(timer);
+      cleanup();
       reject(Object.assign(new Error(`Impossible de lancer pi (${runner.desc}) : ${e.message}`), { status: 502 }));
     });
     child.on('close', (code) => {
       if (done) return;
       done = true;
-      clearTimeout(timer);
+      cleanup();
       const ms = Date.now() - started;
       if (code !== 0) {
         const tail = (err || out).trim().split('\n').slice(-8).join('\n');

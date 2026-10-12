@@ -43,7 +43,7 @@ function jobBlock(job = {}) {
   ].join('\n');
 }
 
-export function buildLetterPrompt({ job, profile, cv, cvText, styleRefs, language, instructions, cfg }) {
+export function buildLetterPrompt({ job, profile, cv, cvText, styleRefs, language, instructions, cfg, uiLanguage = 'fr' }) {
   const lang = language === 'fr' || language === 'en' ? language : null;
   const maxWords = Number(cfg.letter?.maxWords) || 380;
   const tone = profile.letter?.tone || cfg.letter?.tone;
@@ -53,6 +53,7 @@ export function buildLetterPrompt({ job, profile, cv, cvText, styleRefs, languag
 
 ## Règles
 - Langue de la lettre : ${lang ? LANG_LABEL[lang] : "la langue principale de l'offre (si l'offre est bilingue, celle de la première version) — français québécois standard avec vouvoiement, ou anglais canadien"}.
+- Langue des avertissements "warnings" uniquement : ${uiLanguage === 'en' ? 'anglais' : 'français'}. Cela ne change jamais la langue de la lettre.
 - Utilise UNIQUEMENT des faits présents dans le CV ou le profil. N'invente aucune expérience, aucun chiffre, aucune date, aucune technologie, aucun diplôme. Ne reprends un chiffre (ex. « 15 % ») que s'il figure dans le CV.
 - N'invente rien sur l'entreprise : appuie-toi seulement sur ce que dit l'offre.
 - Fais des liens concrets entre 2 ou 3 exigences clés de l'offre et les expériences ou projets les plus pertinents du candidat.
@@ -99,7 +100,7 @@ ${
 `;
 }
 
-export function buildAnswersPrompt({ fields, job, profile, cvText, letter, memory }) {
+export function buildAnswersPrompt({ fields, job, profile, cvText, letter, memory, uiLanguage = 'fr' }) {
   const id = profile.identity || {};
   const name = [id.firstName, id.lastName].filter(Boolean).join(' ') || 'le candidat';
   const memoryItems = Object.values(memory?.items || {})
@@ -118,7 +119,7 @@ export function buildAnswersPrompt({ fields, job, profile, cvText, letter, memor
 - Déclarations volontaires (genre, origine, autochtone, handicap, minorité visible, orientation…) : suis la section voluntaryDisclosures du profil ; « prefer not » signifie choisir l'option du type « Je ne souhaite pas répondre » / « I do not wish to answer ».
 - Autorisation de travail, parrainage, etc. : utilise workAuthorization ; si la valeur est null, réponds null.
 - Ne remplis jamais : mots de passe, signatures électroniques, cases de consentement légal, CAPTCHA → null.
-- "confidence" entre 0 et 1 ; moins de 0.7 si tu déduis ou si tu n'es pas sûr. "note" : courte justification ou ce qu'il faut vérifier, en français.
+- "confidence" entre 0 et 1 ; moins de 0.7 si tu déduis ou si tu n'es pas sûr. "note" : courte justification ou ce qu'il faut vérifier, en ${uiLanguage === 'en' ? 'anglais' : 'français'}. Cette langue d'interface ne change PAS la langue des valeurs / réponses à saisir.
 
 ## Format de réponse
 Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour :

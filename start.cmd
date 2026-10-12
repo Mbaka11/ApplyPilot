@@ -1,16 +1,16 @@
 @echo off
 chcp 65001 >nul
-title ApplyPilot - serveur local
+title ApplyPilot - local server
 cd /d "%~dp0server"
 where node >nul 2>nul || (
-  echo Node.js est introuvable. Installe-le depuis https://nodejs.org puis relance ce fichier.
+  echo Node.js was not found. Install it from https://nodejs.org and run this file again.
   pause
   exit /b 1
 )
 if not exist node_modules (
-  echo Installation des dependances, une seule fois...
+  echo Installing dependencies - first run only...
   call npm install --no-audit --no-fund || (
-    echo Echec de npm install.
+    echo npm install failed.
     pause
     exit /b 1
   )

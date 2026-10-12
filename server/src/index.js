@@ -13,7 +13,8 @@ import {
   profileWarnings,
 } from './config.js';
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
-import { askJson, resolvePi } from './llm.js';
+import { askJson, cancelAllPi, resolvePi } from './llm.js';
+import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
 import { detectRequirements, transcriptPath } from './requirements.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
@@ -37,6 +38,7 @@ import { detectLanguage, ensureDir, escapeHtml, safeFileName, writeText } from '
 
 const require = createRequire(import.meta.url);
 const VERSION = require('../package.json').version;
+const en = (source) => translate(source, 'en');
 
 // ---------------------------------------------------------------------------
 // Mini-routeur
@@ -343,6 +345,7 @@ route('POST', '/applications/:id/letter', async ({ params, body }) => {
     cvText: cv ? getCvText(cv) : '',
     styleRefs: loadStyleRefs(cfg),
     language: body.language,
+    uiLanguage: body.uiLanguage,
     instructions: String(body.instructions || '').slice(0, 2000),
     cfg,
   });
@@ -412,7 +415,7 @@ route('GET', '/applications/:id/letter.txt', ({ params, res }) => {
   return undefined;
 });
 
-route('POST', '/answers', async ({ body }) => {
+route('POST', '/answers', async ({ body, res }) => {
   const cfg = getConfig();
   const profile = getProfile();
   const fields = sanitizeFields(body.fields).filter((f) => f.id && f.label);
@@ -435,8 +438,20 @@ route('POST', '/answers', async ({ body }) => {
     cvText: cv ? getCvText(cv) : '',
     letter: app?.letter,
     memory: getMemory(),
+    uiLanguage: body.uiLanguage,
   });
-  const { data, ms } = await askJson(prompt, { cfg, thinking: cfg.llm.answersThinking });
+  // Closing the panel or aborting fetch must also stop the owned pi process.
+  const controller = new AbortController();
+  const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', disconnect);
+  if (res.destroyed) controller.abort();
+  let reply;
+  try {
+    reply = await askJson(prompt, { cfg, thinking: cfg.llm.answersThinking, signal: controller.signal });
+  } finally {
+    res.off('close', disconnect);
+  }
+  const { data, ms } = reply;
   const ids = new Set(fields.map((f) => f.id));
   const answers = {};
   for (const [id, a] of Object.entries(data?.answers || {})) {
@@ -470,20 +485,21 @@ route('GET', '/', ({ res }) => {
   const cfg = getConfig();
   const { cvs, error } = listCvs(cfg);
   const apps = listApplications();
-  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>ApplyPilot</title>
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ApplyPilot v${VERSION}</title>
 <style>body{font:14px/1.5 'Segoe UI',system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 16px;color:#1f2328}code{background:#f3f4f6;padding:1px 5px;border-radius:4px}li{margin:2px 0}</style></head>
-<body><h1>ApplyPilot ✓</h1><p>Le serveur local fonctionne (v${VERSION}). Utilise l'extension Chrome pour postuler.</p>
-<ul><li>Profil : <code>${escapeHtml(PROFILE_FILE)}</code></li>
-<li>CV (${cvs.length}) : <code>${escapeHtml(cfg.cvDir || 'non configuré')}</code>${error ? ` — ⚠️ ${escapeHtml(error)}` : ''}</li>
-<li>Candidatures : ${apps.length} — <a href="/journal.csv">exporter le journal (CSV)</a></li>
-<li>pi : <code>${escapeHtml(resolvePi(cfg).desc)}</code></li>
-<li>Chrome (PDF) : <code>${escapeHtml(findChrome(cfg) || 'introuvable')}</code></li></ul>
-<h2>Installer ou recharger l’extension dans ton Chrome habituel</h2>
-<ol><li>Ouvre <code>chrome://extensions</code> dans Chrome et active le mode développeur.</li>
-<li>Clique sur <b>Charger l’extension non empaquetée</b> et choisis <code>${escapeHtml(path.join(ROOT, 'extension'))}</code>. Si elle est déjà installée, clique sur son bouton de rechargement.</li>
-<li>Dans le menu <b>Extensions (🧩)</b>, épingle <b>ApplyPilot</b>, puis clique sur son icône.</li>
-<li>L’onglet <b>Profil</b> permet de modifier et enregistrer ton adresse et tes autres informations, sans ouvrir le YAML.</li></ol>
-<p>Le bouton <b>Postuler / connexion</b> ouvre Workday dans ce navigateur et réutilise une session valide. Mots de passe gérés par Chrome ; CAPTCHA, double authentification et soumission restent manuels.</p>
+<body><h1>ApplyPilot <small>v${VERSION}</small> ✓</h1><p>The local server is running. Use the Chrome extension to apply.</p>
+<ul><li>Profile: <code>${escapeHtml(PROFILE_FILE)}</code></li>
+<li>CVs (${cvs.length}): <code>${escapeHtml(cfg.cvDir || 'not configured')}</code>${error ? ` — ⚠️ ${escapeHtml(en(error))}` : ''}</li>
+<li>Applications: ${apps.length} — <a href="/journal.csv">export tracker (CSV)</a></li>
+<li>pi: <code>${escapeHtml(resolvePi(cfg).desc)}</code></li>
+<li>Chrome (PDF): <code>${escapeHtml(findChrome(cfg) || 'not found')}</code></li></ul>
+<h2>Install or reload the extension in your usual browser</h2>
+<ol><li>Open <code>chrome://extensions</code> and enable Developer mode.</li>
+<li>Click <b>Load unpacked</b> and select <code>${escapeHtml(path.join(ROOT, 'extension'))}</code>, not the project root. If already installed, click its reload button.</li>
+<li>Pin <b>ApplyPilot</b> in the <b>Extensions (🧩)</b> menu, then click its icon.</li>
+<li>Edit contact details and availability in <b>Profile</b>. Choose <b>English / Français</b> below the header; this never changes the language of your letters or form answers.</li></ol>
+<p><b>Apply / sign in</b> reuses valid Workday sessions and already open forms. Chrome manages passwords; CAPTCHA, MFA and submission remain manual.</p>
+<p><b>Stop</b> cancels pending autofill and pi answers. Existing entries are preserved. After an update, reload ApplyPilot and reopen its panel — <b>do not reload an unsaved Workday form</b>.</p>
 </body></html>`;
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
@@ -513,15 +529,15 @@ const server = http.createServer(async (req, res) => {
     );
     const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
     const result = await match.handler({ req, res, params, query: url.searchParams, body });
-    if (result !== undefined && !res.headersSent) sendJson(res, 200, result);
+    if (result !== undefined && !res.headersSent && !res.destroyed) sendJson(res, 200, result);
   } catch (e) {
     status = e.status || 500;
-    if (status >= 500) console.error(`[erreur] ${req.method} ${url.pathname} :`, e.message);
-    if (!res.headersSent) sendJson(res, status, { error: e.message || String(e) });
-    else res.end();
+    if (status >= 500) console.error(`[error] ${req.method} ${url.pathname}:`, en(e.message));
+    if (!res.headersSent && !res.destroyed) sendJson(res, status, { error: e.message || String(e) });
+    else if (!res.destroyed) res.end();
   } finally {
     if (url.pathname !== '/health') {
-      console.log(`${new Date().toLocaleTimeString('fr-CA')} ${req.method} ${url.pathname} → ${status} (${Date.now() - started} ms)`);
+      console.log(`${new Date().toLocaleTimeString('en-CA')} ${req.method} ${url.pathname} → ${status} (${Date.now() - started} ms)`);
     }
   }
 });
@@ -534,7 +550,7 @@ ensureDir(DATA_DIR);
 
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
-    console.error(`Le port ${cfg.server.port} est déjà utilisé : ApplyPilot tourne peut-être déjà (http://127.0.0.1:${cfg.server.port}).`);
+    console.error(`Port ${cfg.server.port} is already in use. ApplyPilot may already be running (http://127.0.0.1:${cfg.server.port}).`);
   } else {
     console.error(e);
   }
@@ -550,16 +566,17 @@ server.listen(cfg.server.port, cfg.server.host, () => {
     warnings = [{ label: e.message }];
   }
   console.log(`\n  ApplyPilot ${VERSION} — http://${cfg.server.host}:${cfg.server.port}`);
-  for (const f of created) console.log(`  + créé : ${f} (à compléter)`);
-  console.log(`  Profil  : ${PROFILE_FILE}`);
-  console.log(`  CV      : ${cvs.length} trouvé(s) dans ${cfg.cvDir || '(non configuré)'}${error ? `  ⚠️  ${error}` : ''}`);
+  for (const f of created) console.log(`  + created: ${f} (complete your details)`);
+  console.log(`  Profile : ${PROFILE_FILE}`);
+  console.log(`  CVs     : ${cvs.length} found in ${cfg.cvDir || '(not configured)'}${error ? `  ⚠️  ${en(error)}` : ''}`);
   console.log(`  pi      : ${resolvePi(cfg).desc}`);
-  console.log(`  Chrome  : ${findChrome(cfg) || 'introuvable (PDF impossible)'}`);
-  if (warnings.length) console.log(`  À compléter dans le profil : ${warnings.map((w) => w.label).join(', ')}`);
-  console.log('\n  Laisse cette fenêtre ouverte pendant que tu postules. Ctrl+C pour arrêter.\n');
+  console.log(`  Chrome  : ${findChrome(cfg) || 'not found (PDF unavailable)'}`);
+  if (warnings.length) console.log(`  Complete your profile: ${warnings.map((w) => en(w.label)).join(', ')}`);
+  console.log('\n  Keep this window open while applying. Ctrl+C to stop.\n');
 });
 
 async function shutdown() {
+  cancelAllPi();
   await closeBrowser();
   process.exit(0);
 }

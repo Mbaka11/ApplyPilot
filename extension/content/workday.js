@@ -19,6 +19,7 @@
 
   /** Le pays modifie le bloc adresse : on le règle avant le reste. */
   async function preFill(ctx) {
+    ctx.checkpoint?.();
     const btn = document.querySelector(
       'button[data-automation-id="countryDropdown"], [data-automation-id="formField-country"] button[aria-haspopup="listbox"], button#country--country',
     );
@@ -82,11 +83,12 @@
       if (topUp ? hasFilledEntry(found.scope, type) : existing > 0) continue;
       const max = Math.min(wanted.length, Number(ctx.options.maxEntries) || 6) - (topUp ? existing : 0);
       for (let i = 0; i < max; i++) {
+        ctx.checkpoint?.();
         const current = addButtonAfter(heading);
         if (!current) break;
         const before = countEntries(current.scope, type);
         AP.click(current.btn);
-        const ok = await AP.waitFor(() => countEntries(current.scope, type) > before, { timeout: 2500 });
+        const ok = await AP.waitFor(() => countEntries(current.scope, type) > before, { timeout: 2500, checkpoint: ctx.checkpoint });
         if (!ok) break;
         added[type]++;
         await AP.sleep(250);

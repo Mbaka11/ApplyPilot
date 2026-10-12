@@ -1,60 +1,60 @@
-# Configuration d'ApplyPilot.
-# Copié automatiquement en config.yaml au premier démarrage (config.yaml n'est jamais publié sur git).
+# ApplyPilot configuration.
+# Copied to config.yaml on first start. config.yaml is private and excluded from Git.
 
 server:
-  host: 127.0.0.1 # ne pas exposer sur le réseau
+  host: 127.0.0.1 # Never expose the server to the network.
   port: 4317
 
-# Dossier contenant tes CV en PDF. Pour chaque « X.pdf », ApplyPilot cherche aussi le
-# source LaTeX dans « X/main.tex » ou « X.tex » : l'IA lit ce texte pour rédiger la lettre.
+# Folder containing your CV PDFs. For X.pdf, ApplyPilot also looks for
+# X/main.tex or X.tex; the model reads that source to understand your experience.
 cvDir: ~/Documents/CV
 
-# (Optionnel) Description des variantes de CV.
-#  - language : fr / en (sinon deviné depuis le nom du fichier : _FR, _EN, (ENG)…)
-#  - default  : variante générale pour cette langue
-#  - tags     : mots-clés qui font recommander une variante spécialisée (≥ 2 occurrences dans l'offre)
+# Optional CV variant metadata:
+#  - language: fr / en (otherwise inferred from filenames: _FR, _EN, (ENG), etc.)
+#  - default: general-purpose variant for this language
+#  - tags: keywords that favor a specialized variant when found in the posting
 cvs:
-  - file: Mon_CV_FR.pdf
+  - file: My_CV_FR.pdf
     language: fr
-    label: CV FR (général)
+    label: General CV (FR)
     default: true
-  - file: Mon_CV_EN.pdf
+  - file: My_CV_EN.pdf
     language: en
-    label: CV EN (général)
+    label: General CV (EN)
     default: true
-  # - file: Mon_CV_FR_Finance.pdf
-  #   language: fr
-  #   label: CV FR – finance
-  #   tags: [quant, finance, trading, risque, portefeuille]
+  # - file: My_CV_EN_Finance.pdf
+  #   language: en
+  #   label: Finance CV (EN)
+  #   tags: [quant, finance, trading, risk, portfolio, risque, portefeuille]
   #   hidden: false
 
-# Lettres de référence (.txt / .md) dont l'IA imite le ton et la structure.
+# Reference letters (.txt / .md) for tone and structure guidance.
 styleDir: data/style
 
 llm:
-  command: pi # « pi » = installation standard ; sinon chemin complet
-  model: "" # vide = modèle par défaut de pi (ex. « sonnet », « opus »)
+  command: pi # Standard installation, or the full path to a launcher.
+  model: "" # Blank = pi's default model (e.g. sonnet, opus).
   letterThinking: medium # off | minimal | low | medium | high | xhigh | max
   answersThinking: low
-  timeoutSeconds: 300
+  timeoutSeconds: 300 # The panel separately limits pending autofill answers to 90 seconds.
 
 chrome:
-  executablePath: "" # vide = détection automatique (Chrome, puis Edge)
+  executablePath: "" # Blank = auto-detect Chrome, then Edge.
 
 letter:
-  paper: Letter # Letter ou A4
-  showHeader: true # en-tête avec nom + coordonnées
+  paper: Letter # Letter or A4
+  showHeader: true # Name and contact header
   showDate: true
   showRecipient: true
-  city: "" # vide = ville du profil
+  city: "" # Blank = profile city
   maxWords: 380
   fileNameFr: "{first}_{last}_Lettre_de_motivation_{company}.pdf"
   fileNameEn: "{first}_{last}_Cover_Letter_{company}.pdf"
 
 fill:
-  # Joint aussi la lettre dans le champ « CV » s'il accepte plusieurs fichiers
-  # et qu'il n'existe pas de champ dédié à la lettre.
+  # Also attach the letter to a CV field when it accepts multiple files
+  # and there is no dedicated cover-letter field.
   attachLetterWithCv: true
-  # Nom du CV joint aux formulaires ({first}, {last}, {lang}). Évite d'exposer le nom d'une
-  # variante (ex. « CV_FR_La_Caisse_Quant.pdf »). Vide = nom du fichier d'origine.
+  # Neutral upload name ({first}, {last}, {lang}); avoids exposing a targeted variant
+  # such as CV_EN_Finance.pdf. Blank = keep the original filename.
   cvFileName: "{first}_{last}_CV.pdf"

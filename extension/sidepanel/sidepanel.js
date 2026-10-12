@@ -1,6 +1,8 @@
 // ApplyPilot — panneau latéral : candidature active, lettre, remplissage, journal, profil.
 import { applicationUrl, existingApplicationTab } from './navigation.mjs';
+import { chooseLanguage, translate } from './i18n.mjs';
 const CONTENT_FILES = [
+  'i18n.js',
   'content/dom.js',
   'content/extract.js',
   'content/fields.js',
@@ -36,6 +38,10 @@ const PLATFORM_LABEL = {
 
 const S = {
   server: DEFAULT_SERVER,
+  uiLanguage: 'en',
+  serverDraft: null,
+  letterInstructions: '',
+  profileResponse: null,
   health: null,
   serverError: '',
   cvs: [],
@@ -51,6 +57,7 @@ const S = {
   letterT0: 0,
   fillBusy: false,
   fillPhase: '',
+  fillRun: null,
   fill: null,
   memory: null,
   profile: null,
@@ -64,12 +71,43 @@ const S = {
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const tr = (source, values = {}) => translate(source, S.uiLanguage, values);
+const statusLabel = (status) => tr(STATUS_LABEL[status] || status);
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString(S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+
+function renderShell() {
+  document.documentElement.lang = S.uiLanguage;
+  $('#appVersion').textContent = `v${VERSION}`;
+  $('#appVersion').title = `${tr('Version de l’extension')} ${VERSION}`;
+  $('#uiLanguage').value = S.uiLanguage;
+  $('#uiLanguageLabel').textContent = tr('Langue de l’interface');
+  $('#serverStatus').title = `${tr('Revérifier la connexion au serveur')} · ${tr('Serveur')} v${S.health?.version || '—'}`;
+  for (const [tab, label] of [['app', 'Candidature'], ['journal', 'Journal'], ['profile', 'Profil']]) {
+    $(`[data-tab="${tab}"]`).textContent = tr(label);
+  }
+}
+
+async function setUiLanguage(language) {
+  if (!['fr', 'en'].includes(language)) return;
+  // A language switch only redraws labels. No API write, navigation or draft reset.
+  if ($('#letterInstructions')) S.letterInstructions = $('#letterInstructions').value;
+  if ($('#serverUrl')) S.serverDraft = $('#serverUrl').value;
+  const details = [...document.querySelectorAll('main details')].map((el) => el.open);
+  S.uiLanguage = language;
+  await chrome.storage.local.set({ uiLanguage: language });
+  renderShell();
+  renderStatus();
+  renderApp();
+  renderJournal();
+  if (S.tab === 'profile') await renderProfile({ refresh: false });
+  document.querySelectorAll('main details').forEach((el, i) => { if (i < details.length) el.open = details[i]; });
+  $('#toast').className = 'toast';
+}
 
 let toastTimer = null;
 function toast(msg, type = '') {
   const t = $('#toast');
-  t.textContent = msg;
+  t.textContent = tr(msg);
   t.className = `toast show ${type}`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.className = 'toast'), type === 'error' ? 6000 : 3000);
@@ -78,15 +116,17 @@ function toast(msg, type = '') {
 // ---------------------------------------------------------------------------
 // Serveur local
 // ---------------------------------------------------------------------------
-async function api(path, { method = 'GET', body } = {}) {
+async function api(path, { method = 'GET', body, signal } = {}) {
   let res;
   try {
     res = await fetch(S.server + path, {
       method,
       headers: body ? { 'content-type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
-  } catch {
+  } catch (error) {
+    if (signal?.aborted || error.name === 'AbortError') throw error;
     S.health = null;
     renderStatus();
     throw new Error('Serveur ApplyPilot injoignable : lance start.cmd');
@@ -108,6 +148,7 @@ async function checkServer() {
     S.health = null;
     S.serverError = e.message;
   }
+  renderShell();
   renderStatus();
 }
 
@@ -126,24 +167,24 @@ async function activeTab() {
 
 const scriptable = (url) => /^https?:\/\//.test(url || '') && !/^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/.test(url);
 
-async function exec(tabId, cmd, payload) {
+async function exec(tabId, cmd, payload, frameIds) {
   const res = await chrome.scripting.executeScript({
-    target: { tabId, allFrames: true },
+    target: frameIds ? { tabId, frameIds } : { tabId, allFrames: true },
     func: (c, p) => (globalThis.__applyPilot ? globalThis.__applyPilot.run(c, p) : null),
     args: [cmd, payload],
   });
   return res.map((r) => (r.result && r.result.__ap ? { frameId: r.frameId, ...r.result } : null)).filter(Boolean);
 }
 
-async function runInTab(cmd, payload = {}) {
-  const tab = await activeTab();
+async function runInTab(cmd, payload = {}, { tabId } = {}) {
+  const tab = tabId == null ? await activeTab() : await chrome.tabs.get(tabId);
   if (!tab || !scriptable(tab.url)) throw new Error('Ouvre une offre ou un formulaire de candidature (page web).');
   const pings = await exec(tab.id, 'ping', {});
   if (!pings.length || pings.some((f) => f.version !== VERSION)) {
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: CONTENT_FILES });
   }
   const frames = await exec(tab.id, cmd, payload);
-  if (!frames.length) throw new Error('Impossible d’accéder à la page : recharge-la (F5) puis réessaie.');
+  if (!frames.length) throw new Error('Impossible d’accéder à la page : ferme et rouvre le panneau, puis réessaie sans recharger ton formulaire.');
   const ok = frames.filter((f) => !f.error);
   if (!ok.length) throw new Error(String(frames[0].error).split('\n')[0]);
   return ok;
@@ -179,6 +220,10 @@ async function refreshPage() {
       step: frames.find((f) => f.step)?.step || null,
     };
     S.pageError = '';
+    if (S.fillRun && (tab.id !== S.fillRun.tabId || S.fillRun.pages?.some((old) => {
+      const current = frames.find((f) => f.frameId === old.frameId);
+      return !current || current.pageIdentity !== old.pageIdentity;
+    }))) stopFill({ pageChanged: true });
     const match = S.apps.find((a) => a.jobKey && a.jobKey === S.page.jobKey);
     if (match && match.id !== S.app?.id) await setActiveApp(match.id, { quiet: true });
   } catch (e) {
@@ -193,6 +238,8 @@ async function refreshPage() {
 // Candidatures
 // ---------------------------------------------------------------------------
 async function setActiveApp(id, { quiet = false } = {}) {
+  if (S.fillRun) stopFill();
+  S.letterInstructions = '';
   if (!id) {
     S.app = null;
     S.draft = null;
@@ -209,7 +256,7 @@ async function setActiveApp(id, { quiet = false } = {}) {
   S.fill = null;
   await chrome.storage.local.set({ activeAppId: id, activeAppCompany: application.job?.company || '' });
   renderApp();
-  if (!quiet) toast(`Candidature active : ${application.job?.company || application.job?.title}`);
+  if (!quiet) toast(tr('Candidature active : {name}', { name: application.job?.company || application.job?.title }));
 }
 
 async function analyze() {
@@ -254,7 +301,7 @@ async function generateLetter() {
     const instructions = $('#letterInstructions')?.value || '';
     const { application, letter } = await api(`/applications/${encodeURIComponent(S.app.id)}/letter`, {
       method: 'POST',
-      body: { language: S.prefs.letterLang, instructions, cvId: S.app.cvId },
+      body: { language: S.prefs.letterLang, instructions, cvId: S.app.cvId, uiLanguage: S.uiLanguage },
     });
     S.app = application;
     S.draft = { subject: letter.subject, body: letter.body };
@@ -293,18 +340,66 @@ function signature(profile) {
 // ---------------------------------------------------------------------------
 // Remplissage
 // ---------------------------------------------------------------------------
+const abortFillError = () => Object.assign(new Error('Remplissage arrêté'), { name: 'AbortError' });
+function assertFill(run) {
+  if (S.fillRun !== run || run.controller.signal.aborted) throw abortFillError();
+}
+
+function stopFill({ pageChanged = false, timedOut = false } = {}) {
+  const run = S.fillRun;
+  if (!run) return;
+  S.fillRun = null; // Free the UI immediately, even if an injected script is still unwinding.
+  clearTimeout(run.answerTimer);
+  run.controller.abort();
+  if (run.tabId != null) exec(run.tabId, 'cancel', { runId: run.id }, run.pages?.map((p) => p.frameId)).catch(() => {});
+  S.fillBusy = false;
+  S.fillPhase = '';
+  if (pageChanged) S.fill = null;
+  renderFill();
+  toast(timedOut ? 'pi met trop de temps : remplissage arrêté. Réessaie ou désactive l’IA.' : pageChanged
+    ? 'Étape changée : ancien remplissage arrêté. Tu peux remplir cette page.'
+    : 'Remplissage arrêté. Les champs déjà remplis sont conservés.');
+}
+
+async function execFill(run, cmd, payload) {
+  assertFill(run);
+  const batches = await Promise.all(run.pages.map((page) => exec(run.tabId, cmd, {
+    ...payload, runId: run.id, expectedPage: page.pageIdentity,
+  }, [page.frameId])));
+  assertFill(run);
+  const frames = batches.flat();
+  if (frames.some((f) => f.cancelled)) {
+    stopFill({ pageChanged: true });
+    throw abortFillError();
+  }
+  if (!frames.length || frames.some((f) => f.error)) throw new Error(frames.find((f) => f.error)?.error || 'Impossible d’accéder à la page : ferme et rouvre le panneau, puis réessaie sans recharger ton formulaire.');
+  return frames;
+}
+
 async function fillPage() {
+  if (S.fillRun) return;
   if (!S.health) return toast('Serveur non connecté : lance start.cmd', 'error');
+  const run = { id: crypto.randomUUID(), controller: new AbortController(), tabId: null, pages: null };
+  S.fillRun = run;
   S.fillBusy = true;
   S.fillPhase = 'Préparation…';
   renderFill();
+  const request = (path, options = {}) => { assertFill(run); return api(path, { ...options, signal: run.controller.signal }); };
   try {
+    const tab = await activeTab();
+    assertFill(run);
+    if (!tab || !scriptable(tab.url)) throw new Error('Ouvre une offre ou un formulaire de candidature (page web).');
+    run.tabId = tab.id;
+    run.pages = await runInTab('detect', {}, { tabId: run.tabId });
+    assertFill(run);
     if (S.draftDirty) await saveLetter();
-    const [{ profile }, memory] = await Promise.all([api('/profile'), api('/memory')]);
+    assertFill(run);
+    const [{ profile }, memory] = await Promise.all([request('/profile'), request('/memory')]);
     const files = {};
-    if (S.app?.cvId) files.cv = await api(`/cvs/${encodeURIComponent(S.app.cvId)}/pdf?base64=1`);
-    if (S.app?.letter?.fileName) files.letter = await api(`/applications/${encodeURIComponent(S.app.id)}/letter.pdf?base64=1`);
-    if (S.health?.documents?.transcript) files.transcript = await api('/documents/transcript?base64=1').catch(() => null);
+    if (S.app?.cvId) files.cv = await request(`/cvs/${encodeURIComponent(S.app.cvId)}/pdf?base64=1`);
+    if (S.app?.letter?.fileName) files.letter = await request(`/applications/${encodeURIComponent(S.app.id)}/letter.pdf?base64=1`);
+    if (S.health?.documents?.transcript) files.transcript = await request('/documents/transcript?base64=1').catch(() => null);
+    assertFill(run);
     const letterText = S.app?.letter?.body ? `${S.app.letter.body}\n\n${signature(profile)}` : '';
     const job = S.app ? { ...S.app.job } : { company: S.page?.company || '', title: S.page?.title || '' };
     const payload = {
@@ -316,40 +411,52 @@ async function fillPage() {
       options: {
         overwrite: S.prefs.overwrite,
         addEntries: S.prefs.addEntries,
+        uiLanguage: S.uiLanguage,
         attachLetterWithCv: S.health?.fill?.attachLetterWithCv !== false,
       },
     };
     S.fillPhase = 'Remplissage de la page…';
     renderFill();
-    const frames = await runInTab('fill', payload);
+    const frames = await execFill(run, 'fill', payload);
     let results = frames.flatMap((f) => f.results || []);
     const unresolved = frames.flatMap((f) => f.unresolved || []);
     const step = frames.find((f) => f.step)?.step || null;
     const info = frames.find((f) => f.info?.addedEntries)?.info || {};
+    S.fill = { results, step, info, at: Date.now(), noCv: !files.cv };
     if (S.prefs.useAi && unresolved.length) {
       S.fillPhase = `pi répond à ${unresolved.length} question${unresolved.length > 1 ? 's' : ''}…`;
       renderFill();
       try {
-        const { answers } = await api('/answers', {
+        run.answerTimer = setTimeout(() => { if (S.fillRun === run) stopFill({ timedOut: true }); }, 90_000);
+        const { answers } = await request('/answers', {
           method: 'POST',
-          body: { applicationId: S.app?.id, cvId: S.app?.cvId, job: S.app ? undefined : job, fields: unresolved },
+          body: { applicationId: S.app?.id, cvId: S.app?.cvId, job: S.app ? undefined : job, fields: unresolved, uiLanguage: S.uiLanguage },
         });
+        clearTimeout(run.answerTimer);
+        assertFill(run);
         S.fillPhase = 'Application des réponses…';
         renderFill();
-        const filled = await runInTab('fillValues', { ...payload, answers });
+        const filled = await execFill(run, 'fillValues', { ...payload, answers });
         const byId = new Map(filled.flatMap((f) => f.results || []).map((r) => [r.id, r]));
         results = results.map((r) => byId.get(r.id) || r);
       } catch (e) {
-        toast(`IA : ${e.message}`, 'error');
+        assertFill(run);
+        if (e.name === 'AbortError') throw e;
+        toast(tr('IA : {error}', { error: tr(e.message) }), 'error');
       }
     }
+    assertFill(run);
     S.fill = { results, step, info, at: Date.now(), noCv: !files.cv };
   } catch (e) {
-    toast(e.message, 'error');
+    if (S.fillRun === run && e.name !== 'AbortError') toast(e.message, 'error');
   } finally {
-    S.fillBusy = false;
-    S.fillPhase = '';
-    renderFill();
+    clearTimeout(run.answerTimer);
+    if (S.fillRun === run) {
+      S.fillRun = null;
+      S.fillBusy = false;
+      S.fillPhase = '';
+      renderFill();
+    }
   }
 }
 
@@ -361,12 +468,12 @@ async function captureMemory({ quiet = false } = {}) {
     return 0;
   }
   const r = await api('/memory', { method: 'POST', body: { items, company: S.app?.job?.company || '' } });
-  if (!quiet) toast(`${r.added} réponse(s) mémorisée(s) ✓`);
+  if (!quiet) toast(tr('{count} réponse(s) mémorisée(s) ✓', { count: r.added }));
   return r.added;
 }
 
 async function markSubmitted() {
-  if (!S.app || !confirm('As-tu déjà envoyé la candidature sur le site de l’employeur et reçu sa confirmation ?\n\nCe bouton met seulement à jour ton journal : il ne soumet pas le formulaire.')) return;
+  if (!S.app || !confirm(tr('As-tu déjà envoyé la candidature sur le site de l’employeur et reçu sa confirmation ?\n\nCe bouton met seulement à jour ton journal : il ne soumet pas le formulaire.'))) return;
   try {
     await captureMemory({ quiet: true });
   } catch {
@@ -384,40 +491,41 @@ function renderStatus() {
   const el = $('#serverStatus');
   const off = $('#offline');
   if (S.health) {
-    el.className = 'status on';
-    el.textContent = `Serveur connecté · ${S.health.cvCount} CV`;
+    const mismatch = S.health.version && S.health.version !== VERSION;
+    el.className = `status on${mismatch ? ' mismatch' : ''}`;
+    el.textContent = mismatch ? tr('Serveur v{version} : à redémarrer', { version: S.health.version }) : tr('Serveur connecté · {count} CV', { count: S.health.cvCount });
     off.classList.add('hidden');
   } else {
     el.className = 'status off';
-    el.textContent = 'Serveur arrêté';
+    el.textContent = tr('Serveur arrêté');
     off.classList.remove('hidden');
-    off.innerHTML = `<b>Le serveur local ne répond pas.</b><div class="small">Double-clique sur <span class="kbd">start.cmd</span> dans le dossier ApplyPilot, puis
-      <button class="btn ghost" data-action="recheck">réessayer</button>.</div>`;
+    off.innerHTML = `<b>${tr('Le serveur local ne répond pas.')}</b><div class="small">${tr('Double-clique sur')} <span class="kbd">start.cmd</span> ${tr('dans le dossier ApplyPilot, puis')}
+      <button class="btn ghost" data-action="recheck">${tr('réessayer')}</button>.</div>`;
   }
 }
 
 function renderPage() {
   const el = $('#pageCard');
   if (!S.page) {
-    el.innerHTML = `<div class="muted small">${esc(S.pageError || 'Analyse de la page…')}</div>`;
+    el.innerHTML = `<div class="muted small">${esc(tr(S.pageError || 'Analyse de la page…'))}</div>`;
     return;
   }
   const p = S.page;
   const known = S.apps.find((a) => a.jobKey && a.jobKey === p.jobKey);
-  const step = p.step?.name ? ` · étape ${p.step.index ? `${p.step.index}/${p.step.total} ` : ''}${esc(p.step.name)}` : '';
+  const step = p.step?.name ? ` · ${tr('étape')} ${p.step.index ? `${p.step.index}/${p.step.total} ` : ''}${esc(p.step.name)}` : '';
   let action = '';
   if (p.isPosting && !known) {
-    action = `<div class="stack"><div><span class="badge">Offre détectée</span></div>
-      <h3>${esc(p.title || 'Offre sans titre')}</h3><div class="muted">${esc(p.company || '')}</div>
-      <button class="btn primary big" data-action="analyze">Analyser cette offre</button></div>`;
+    action = `<div class="stack"><div><span class="badge">${tr('Offre détectée')}</span></div>
+      <h3>${esc(p.title || tr('Offre sans titre'))}</h3><div class="muted">${esc(p.company || '')}</div>
+      <button class="btn primary big" data-action="analyze">${tr('Analyser cette offre')}</button></div>`;
   } else if (p.fieldCount > 0) {
-    action = `<div class="small muted">Formulaire : ${p.fieldCount} champ(s)${p.fileCount ? ` + ${p.fileCount} fichier(s)` : ''}${step}</div>`;
+    action = `<div class="small muted">${tr('Formulaire : {count} champ(s)', { count: p.fieldCount })}${p.fileCount ? tr(' + {count} fichier(s)', { count: p.fileCount }) : ''}${step}</div>`;
   } else if (!p.isPosting) {
-    action = `<div class="small muted">Aucune offre ni formulaire détecté ici.
-      <button class="btn ghost" data-action="analyze">Analyser quand même</button></div>`;
+    action = `<div class="small muted">${tr('Aucune offre ni formulaire détecté ici.')}
+      <button class="btn ghost" data-action="analyze">${tr('Analyser quand même')}</button></div>`;
   }
-  el.innerHTML = `<h2><span>Page</span><span class="badge grey">${esc(PLATFORM_LABEL[p.platform] || p.platform)}</span></h2>${action}
-    ${p.hasPassword ? '<div class="small muted">🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.</div>' : ''}`;
+  el.innerHTML = `<h2><span>Page</span><span class="badge grey">${esc(tr(PLATFORM_LABEL[p.platform] || p.platform))}</span></h2>${action}
+    ${p.hasPassword ? `<div class="small muted">${tr('🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.')}</div>` : ''}`;
 }
 
 /** Exigences repérées dans l'offre (pièces, conditions), comparées au profil. */
@@ -426,19 +534,19 @@ function requirementsHtml(reqs) {
   const icon = { ok: '✓', todo: '!', warn: '⚠', info: 'ℹ' };
   const items = reqs
     .map((r) => `<li class="req ${esc(r.status)}" title="${esc(r.excerpt || '')}"><span class="req-icon">${icon[r.status] || '•'}</span>
-      <span><b>${esc(r.label)}</b>${r.note ? ` <span class="muted">— ${esc(r.note)}</span>` : ''}</span></li>`)
+      <span><b>${esc(tr(r.label))}</b>${r.note ? ` <span class="muted">— ${esc(tr(r.note))}</span>` : ''}</span></li>`)
     .join('');
   const todo = reqs.filter((r) => r.status === 'todo' || r.status === 'warn').length;
-  return `<details class="reqs" ${todo ? 'open' : ''}><summary>À prévoir pour cette offre${todo ? ` <span class="badge warn">${todo}</span>` : ''}</summary><ul class="req-list">${items}</ul></details>`;
+  return `<details class="reqs" ${todo ? 'open' : ''}><summary>${tr('À prévoir pour cette offre')}${todo ? ` <span class="badge warn">${todo}</span>` : ''}</summary><ul class="req-list">${items}</ul></details>`;
 }
 
 function renderAppCard() {
   const el = $('#appCard');
   if (!S.app) {
     const recent = S.apps.filter((a) => a.status === 'en cours').slice(0, 8);
-    el.innerHTML = `<h2>Candidature active</h2>
-      <div class="muted small">Aucune. Ouvre l’offre et clique « Analyser cette offre » : la candidature reste active pendant que tu remplis le formulaire.</div>
-      ${recent.length ? `<label class="field" style="margin-top:8px">Reprendre une candidature en cours</label>
+    el.innerHTML = `<h2>${tr('Candidature active')}</h2>
+      <div class="muted small">${tr('Aucune. Ouvre l’offre et clique « Analyser cette offre » : la candidature reste active pendant que tu remplis le formulaire.')}</div>
+      ${recent.length ? `<label class="field" style="margin-top:8px">${tr('Reprendre une candidature en cours')}</label>
         <select id="pickApp"><option value="">—</option>${recent.map((a) => `<option value="${esc(a.id)}">${esc(a.company || '?')} — ${esc(a.title || '')}</option>`).join('')}</select>` : ''}`;
     return;
   }
@@ -447,18 +555,18 @@ function renderAppCard() {
   const cvOptions = S.cvs
     .map((c) => `<option value="${esc(c.id)}" ${c.id === a.cvId ? 'selected' : ''}>${esc(c.name)}${c.language ? ` (${c.language.toUpperCase()})` : ''}${rec?.cvId === c.id ? ' ★' : ''}</option>`)
     .join('');
-  el.innerHTML = `<h2><span>Candidature active</span><span class="badge ${a.status === 'soumise' ? 'ok' : ''}">${esc(STATUS_LABEL[a.status] || a.status)}</span></h2>
-    <h3>${esc(a.job?.title || 'Poste')}</h3>
+  el.innerHTML = `<h2><span>${tr('Candidature active')}</span><span class="badge ${a.status === 'soumise' ? 'ok' : ''}">${esc(statusLabel(a.status))}</span></h2>
+    <h3>${esc(a.job?.title || tr('Poste'))}</h3>
     ${requirementsHtml(S.requirements)}
     <div class="muted">${esc(a.job?.company || '')}${a.job?.location ? ` · ${esc(a.job.location)}` : ''}</div>
     <div class="stack" style="margin-top:10px">
-      <div><label class="field" for="cvSelect">CV à joindre ${rec?.cvId ? `<span class="muted">(★ recommandé : ${esc(rec.reason || '')})</span>` : ''}</label>
-        <select id="cvSelect">${cvOptions || '<option value="">Aucun CV trouvé</option>'}</select></div>
-      ${a.job?.url && a.status !== 'soumise' ? '<button class="btn primary big" data-action="applyJob">Postuler / connexion</button><div class="small muted">Ouvre dans ce navigateur : une session Workday valide est réutilisée. Compte propre à chaque entreprise ; mots de passe gérés par Chrome.</div>' : ''}
+      <div><label class="field" for="cvSelect">${tr('CV à joindre')} ${rec?.cvId ? `<span class="muted">${esc(tr('(★ recommandé : {reason})', { reason: tr(rec.reason || '') }))}</span>` : ''}</label>
+        <select id="cvSelect">${cvOptions || `<option value="">${tr('Aucun CV trouvé')}</option>`}</select></div>
+      ${a.job?.url && a.status !== 'soumise' ? `<button class="btn primary big" data-action="applyJob">${tr('Postuler / connexion')}</button><div class="small muted">${tr('Ouvre dans ce navigateur : une session Workday valide est réutilisée. Compte propre à chaque entreprise ; mots de passe gérés par Chrome.')}</div>` : ''}
       <div class="row">
-        ${a.job?.url ? '<button class="btn ghost" data-action="openJob">Voir l’offre</button>' : ''}
+        ${a.job?.url ? `<button class="btn ghost" data-action="openJob">${tr('Voir l’offre')}</button>` : ''}
         <span class="grow"></span>
-        <button class="btn ghost" data-action="newApp" title="Désactiver (l’historique reste dans le Journal)">Changer d’offre</button>
+        <button class="btn ghost" data-action="newApp" title="${tr('Désactiver (l’historique reste dans le Journal)')}">${tr('Changer d’offre')}</button>
       </div>
     </div>`;
 }
@@ -471,32 +579,32 @@ function renderLetter() {
   }
   const L = S.app.letter;
   const langSel = `<select id="letterLang" style="width:auto">
-      ${[['auto', 'Langue de l’offre'], ['fr', 'Français'], ['en', 'English']].map(([v, t]) => `<option value="${v}" ${S.prefs.letterLang === v ? 'selected' : ''}>${t}</option>`).join('')}
+      ${[['auto', tr('Langue de l’offre')], ['fr', 'Français'], ['en', 'English']].map(([v, label]) => `<option value="${v}" ${S.prefs.letterLang === v ? 'selected' : ''}>${label}</option>`).join('')}
     </select>`;
   if (S.letterBusy) {
-    el.innerHTML = `<h2>Lettre de motivation</h2><div class="busy"><span class="spinner"></span>pi rédige ta lettre… <span id="letterTimer">0 s</span>
-      <div class="small" style="font-weight:400">Environ 20 à 60 s.</div></div>`;
+    el.innerHTML = `<h2>${tr('Lettre de motivation')}</h2><div class="busy"><span class="spinner"></span>${tr('pi rédige ta lettre…')} <span id="letterTimer">0 s</span>
+      <div class="small" style="font-weight:400">${tr('Environ 20 à 60 s.')}</div></div>`;
     return;
   }
-  const head = `<h2><span>Lettre de motivation</span>${L ? `<span class="badge ok">${esc((L.language || '').toUpperCase())} · PDF prêt</span>` : ''}</h2>`;
-  const gen = `<details ${L ? '' : 'open'}><summary>${L ? 'Régénérer' : 'Générer'} avec des consignes (facultatif)</summary>
-      <textarea id="letterInstructions" rows="2" placeholder="Ex. : insiste sur mon projet RL, ton plus formel, mentionne ma disponibilité à temps plein…"></textarea></details>
-    <div class="row">${langSel}<span class="grow"></span><button class="btn ${L ? '' : 'primary'}" data-action="generate">${L ? 'Régénérer' : 'Générer la lettre'}</button></div>`;
+  const head = `<h2><span>${tr('Lettre de motivation')}</span>${L ? `<span class="badge ok">${esc((L.language || '').toUpperCase())} · ${tr('PDF prêt')}</span>` : ''}</h2>`;
+  const gen = `<details ${L ? '' : 'open'}><summary>${tr(L ? 'Régénérer' : 'Générer')} ${tr('avec des consignes (facultatif)')}</summary>
+      <textarea id="letterInstructions" rows="2" placeholder="${tr('Ex. : insiste sur mon projet RL, ton plus formel, mentionne ma disponibilité à temps plein…')}">${esc(S.letterInstructions)}</textarea></details>
+    <div class="row">${langSel}<span class="grow"></span><button class="btn ${L ? '' : 'primary'}" data-action="generate">${tr(L ? 'Régénérer' : 'Générer la lettre')}</button></div>`;
   if (!L || !S.draft) {
     el.innerHTML = `${head}<div class="stack">${gen}</div>`;
     return;
   }
   el.innerHTML = `${head}<div class="stack">
-    <div><label class="field" for="letterSubject">Objet</label><input type="text" id="letterSubject" value="${esc(S.draft.subject)}"></div>
-    <div><label class="field" for="letterBody">Texte (paragraphes séparés par une ligne vide, sans la signature)</label>
+    <div><label class="field" for="letterSubject">${tr('Objet')}</label><input type="text" id="letterSubject" value="${esc(S.draft.subject)}"></div>
+    <div><label class="field" for="letterBody">${tr('Texte (paragraphes séparés par une ligne vide, sans la signature)')}</label>
       <textarea id="letterBody">${esc(S.draft.body)}</textarea></div>
-    ${L.warnings?.length ? `<div><b class="small">À vérifier :</b><ul class="warnings">${L.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
+    ${L.warnings?.length ? `<div><b class="small">${tr('À vérifier :')}</b><ul class="warnings">${L.warnings.map((w) => `<li>${esc(tr(w))}</li>`).join('')}</ul></div>` : ''}
     <div class="row">
-      <button class="btn ${S.draftDirty ? 'primary' : ''}" data-action="saveLetter">Mettre à jour le PDF</button>
-      <button class="btn" data-action="openLetter">Ouvrir le PDF</button>
-      <button class="btn ghost" data-action="copyLetter">Copier le texte</button>
+      <button class="btn ${S.draftDirty ? 'primary' : ''}" data-action="saveLetter">${tr('Mettre à jour le PDF')}</button>
+      <button class="btn" data-action="openLetter">${tr('Ouvrir le PDF')}</button>
+      <button class="btn ghost" data-action="copyLetter">${tr('Copier le texte')}</button>
     </div>
-    <div class="small muted">${esc(L.fileName || '')}${L.fit && !L.fit.fitsOnePage ? ' · ⚠️ dépasse une page : raccourcis le texte' : ''}</div>
+    <div class="small muted">${esc(L.fileName || '')}${L.fit && !L.fit.fitsOnePage ? tr(' · ⚠️ dépasse une page : raccourcis le texte') : ''}</div>
     ${gen}</div>`;
 }
 
@@ -509,15 +617,18 @@ const RES_GROUPS = [
 const groupOf = (r) => (r.status === 'fail' || r.status === 'unresolved' ? 'todo' : r.status === 'skip' ? 'check' : r.status);
 
 function renderFill() {
+  $('#headerStop').classList.toggle('hidden', !S.fillBusy);
+  $('#headerStop').textContent = tr('Arrêter');
   const el = $('#fillCard');
   const opts = `<div class="stack small" style="margin-top:8px">
-      <label class="check"><input type="checkbox" id="optAi" ${S.prefs.useAi ? 'checked' : ''}> Faire répondre pi aux questions restantes</label>
-      <label class="check"><input type="checkbox" id="optEntries" ${S.prefs.addEntries ? 'checked' : ''}> Workday : ajouter mes expériences et formations si la section est vide</label>
-      <label class="check"><input type="checkbox" id="optOverwrite" ${S.prefs.overwrite ? 'checked' : ''}> Remplacer les champs déjà remplis</label>
+      <label class="check"><input type="checkbox" id="optAi" ${S.prefs.useAi ? 'checked' : ''}> ${tr('Faire répondre pi aux questions restantes')}</label>
+      <label class="check"><input type="checkbox" id="optEntries" ${S.prefs.addEntries ? 'checked' : ''}> ${tr('Workday : ajouter mes expériences et formations si la section est vide')}</label>
+      <label class="check"><input type="checkbox" id="optOverwrite" ${S.prefs.overwrite ? 'checked' : ''}> ${tr('Remplacer les champs déjà remplis')}</label>
     </div>`;
   if (S.fillBusy) {
-    el.innerHTML = `<h2>Remplissage</h2><div class="busy"><span class="spinner"></span>${esc(S.fillPhase)}</div>
-      <div class="small muted" style="margin-top:6px">Ne touche pas à la page pendant le remplissage.</div>`;
+    el.innerHTML = `<h2>${tr('Remplissage')}</h2><div class="busy" role="status"><span class="spinner"></span>${esc(tr(S.fillPhase))}</div>
+      <button type="button" class="btn danger" style="margin-top:8px" data-action="stopFill">${tr('Arrêter')}</button>
+      <div class="small muted" style="margin-top:6px">${tr('Ne touche pas à la page pendant le remplissage.')}</div>`;
     return;
   }
   let body = '';
@@ -526,7 +637,7 @@ function renderFill() {
     for (const r of S.fill.results) (groups[groupOf(r)] ||= []).push(r);
     const added = S.fill.info?.addedEntries;
     body += `<div class="summary">${RES_GROUPS.filter(([k]) => groups[k]?.length)
-      .map(([k, t, cls]) => `<span class="badge ${cls}">${groups[k].length} ${t.toLowerCase()}</span>`)
+      .map(([k, t, cls]) => `<span class="badge ${cls}">${groups[k].length} ${tr(t).toLowerCase()}</span>`)
       .join('')}</div>`;
     const addedText = [
       [added?.experience, 'expérience(s)'],
@@ -535,33 +646,33 @@ function renderFill() {
       [added?.website, 'site(s) Web'],
     ]
       .filter(([n]) => n)
-      .map(([n, t]) => `${n} ${t}`);
-    if (addedText.length) body += `<div class="small muted">Blocs ajoutés : ${addedText.join(', ')}.</div>`;
-    if (S.fill.noCv) body += '<div class="small" style="color:var(--warn)">Aucun CV joint : analyse l’offre d’abord pour choisir un CV.</div>';
+      .map(([n, label]) => `${n} ${tr(label)}`);
+    if (addedText.length) body += `<div class="small muted">${esc(tr('Blocs ajoutés : {entries}.', { entries: addedText.join(', ') }))}</div>`;
+    if (S.fill.noCv) body += `<div class="small" style="color:var(--warn)">${tr('Aucun CV joint : analyse l’offre d’abord pour choisir un CV.')}</div>`;
     for (const [k, t] of RES_GROUPS) {
       const list = groups[k];
       if (!list?.length) continue;
       const items = list
         .map(
-          (r) => `<li class="${k}" data-focus="${esc(r.id)}"><div><span class="lbl">${esc(r.label)}</span>${r.required ? ' <span class="muted">*</span>' : ''}</div>
-          ${r.value ? `<div class="val">${esc(r.value)}</div>` : ''}${r.note ? `<div class="note">${esc(r.note)}${r.source === 'ia' ? ' · IA' : ''}</div>` : ''}</li>`,
+          (r) => `<li class="${k}" data-focus="${esc(r.id)}"><div><span class="lbl">${esc(r.label === '(sans libellé)' ? tr(r.label) : r.label)}</span>${r.required ? ' <span class="muted">*</span>' : ''}</div>
+          ${r.value ? `<div class="val">${esc(['checkbox', 'checkboxes'].includes(r.kind) ? tr(r.value) : r.value)}</div>` : ''}${r.note ? `<div class="note">${esc(tr(r.note))}${r.source === 'ia' ? ` · ${tr('IA')}` : ''}</div>` : ''}</li>`,
         )
         .join('');
       const open = k === 'check' || k === 'todo';
-      body += `<details ${open ? 'open' : ''}><summary>${t} (${list.length})</summary><ul class="results">${items}</ul></details>`;
+      body += `<details ${open ? 'open' : ''}><summary>${tr(t)} (${list.length})</summary><ul class="results">${items}</ul></details>`;
     }
-    body += `<div class="legend"><span class="l-ok">rempli</span><span class="l-check">à vérifier</span><span class="l-todo">à compléter</span></div>`;
+    body += `<div class="legend"><span class="l-ok">${tr('rempli')}</span><span class="l-check">${tr('à vérifier')}</span><span class="l-todo">${tr('à compléter')}</span></div>`;
   }
   const submitted = S.app?.status === 'soumise';
-  el.innerHTML = `<h2>Remplissage</h2>
-    <button class="btn primary big" data-action="fill">${S.fill ? 'Remplir à nouveau' : 'Remplir cette page'}</button>
+  el.innerHTML = `<h2>${tr('Remplissage')}</h2>
+    <button class="btn primary big" data-action="fill">${tr(S.fill ? 'Remplir à nouveau' : 'Remplir cette page')}</button>
     ${opts}${body}
     <div class="row" style="margin-top:10px">
-      <button class="btn ghost" data-action="memorize" title="Retenir tes réponses aux questions de cette page pour les prochaines candidatures">Mémoriser mes réponses</button>
+      <button class="btn ghost" data-action="memorize" title="${tr('Retenir tes réponses aux questions de cette page pour les prochaines candidatures')}">${tr('Mémoriser mes réponses')}</button>
       <span class="grow"></span>
-      ${S.app ? `<button class="btn ${submitted ? '' : 'primary'}" data-action="submitted" ${submitted ? 'disabled' : ''}>${submitted ? 'Soumise ✓' : 'J’ai soumis ✓'}</button>` : ''}
+      ${S.app ? `<button class="btn ${submitted ? '' : 'primary'}" data-action="submitted" ${submitted ? 'disabled' : ''}>${tr(submitted ? 'Soumise ✓' : 'J’ai soumis ✓')}</button>` : ''}
     </div>
-    <div class="small muted" style="margin-top:6px">ApplyPilot ne clique jamais sur « Soumettre » : vérifie la page, passe à l’étape suivante, puis relance le remplissage.</div>`;
+    <div class="small muted" style="margin-top:6px">${tr('ApplyPilot ne clique jamais sur « Soumettre » : vérifie la page, passe à l’étape suivante, puis relance le remplissage.')}</div>`;
 }
 
 function renderApp() {
@@ -574,7 +685,7 @@ function renderApp() {
 function renderJournal() {
   const el = $('#tab-journal');
   if (!S.health) {
-    el.innerHTML = '<div class="card muted">Serveur non connecté.</div>';
+    el.innerHTML = `<div class="card muted">${tr('Serveur non connecté.')}</div>`;
     return;
   }
   const counts = {};
@@ -584,18 +695,18 @@ function renderJournal() {
       (a) => `<li><div class="row"><b class="grow">${esc(a.company || '?')}</b><span class="small muted">${esc(fmtDate(a.createdAt))}</span></div>
       <div>${esc(a.title || '')}</div>
       <div class="row" style="margin-top:4px">
-        <select data-status="${esc(a.id)}" style="width:auto">${S.statuses.map((s) => `<option value="${esc(s)}" ${s === a.status ? 'selected' : ''}>${esc(STATUS_LABEL[s] || s)}</option>`).join('')}</select>
+        <select data-status="${esc(a.id)}" style="width:auto">${S.statuses.map((s) => `<option value="${esc(s)}" ${s === a.status ? 'selected' : ''}>${esc(statusLabel(s))}</option>`).join('')}</select>
         <span class="grow"></span>
-        ${a.url ? `<button class="btn ghost" data-open-url="${esc(a.url)}">Offre</button>` : ''}
-        ${a.hasLetter ? `<button class="btn ghost" data-open-letter="${esc(a.id)}">Lettre</button>` : ''}
-        <button class="btn ghost" data-activate="${esc(a.id)}">Activer</button>
-        <button class="btn ghost danger" data-delete="${esc(a.id)}" title="Supprimer">✕</button>
+        ${a.url ? `<button class="btn ghost" data-open-url="${esc(a.url)}">${tr('Offre')}</button>` : ''}
+        ${a.hasLetter ? `<button class="btn ghost" data-open-letter="${esc(a.id)}">${tr('Lettre')}</button>` : ''}
+        <button class="btn ghost" data-activate="${esc(a.id)}">${tr('Activer')}</button>
+        <button class="btn ghost danger" data-delete="${esc(a.id)}" title="${tr('Supprimer')}">✕</button>
       </div></li>`,
     )
     .join('');
-  el.innerHTML = `<div class="card"><h2><span>Journal (${S.apps.length})</span><button class="btn ghost" data-action="exportCsv">Exporter CSV</button></h2>
-    <div class="summary">${Object.entries(counts).map(([s, n]) => `<span class="badge ${s === 'soumise' ? 'ok' : s === 'refusée' ? 'bad' : s === 'entrevue' || s === 'offre' ? 'warn' : ''}">${n} ${esc((STATUS_LABEL[s] || s).toLowerCase())}</span>`).join('')}</div>
-    ${S.apps.length ? `<ul class="list">${items}</ul>` : '<div class="muted">Aucune candidature pour l’instant.</div>'}</div>`;
+  el.innerHTML = `<div class="card"><h2><span>${tr('Journal')} (${S.apps.length})</span><button class="btn ghost" data-action="exportCsv">${tr('Exporter CSV')}</button></h2>
+    <div class="summary">${Object.entries(counts).map(([s, n]) => `<span class="badge ${s === 'soumise' ? 'ok' : s === 'refusée' ? 'bad' : s === 'entrevue' || s === 'offre' ? 'warn' : ''}">${n} ${esc(statusLabel(s).toLowerCase())}</span>`).join('')}</div>
+    ${S.apps.length ? `<ul class="list">${items}</ul>` : `<div class="muted">${tr('Aucune candidature pour l’instant.')}</div>`}</div>`;
 }
 
 function profileField(f) {
@@ -605,15 +716,22 @@ function profileField(f) {
   const attrs = `id="${esc(id)}" data-profile-path="${esc(f.path)}"`;
   let input;
   if (f.type === 'boolean') {
-    input = `<select ${attrs}>${[['', 'Je réponds moi-même'], ['true', 'Oui'], ['false', 'Non']].map(([v, label]) => `<option value="${v}" ${v === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`;
+    input = `<select ${attrs}>${[['', 'Je réponds moi-même'], ['true', 'Oui'], ['false', 'Non']].map(([v, label]) => `<option value="${v}" ${v === value ? 'selected' : ''}>${tr(label)}</option>`).join('')}</select>`;
   } else {
     const type = f.type === 'integer' ? 'number' : f.type === 'path' ? 'text' : f.type;
     input = `<input ${attrs} type="${esc(type)}" value="${esc(value)}" maxlength="500"
       ${f.autocomplete ? `autocomplete="${esc(f.autocomplete)}"` : 'autocomplete="off"'}
-      ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''}
+      ${f.placeholder ? `placeholder="${esc(tr(f.placeholder))}"` : ''}
       ${f.type === 'integer' ? `min="${f.min}" max="${f.max}" step="1"` : ''}>`;
   }
-  return `<div class="profile-field"><label class="field" for="${esc(id)}">${esc(f.label)}</label>${input}</div>`;
+  let label = tr(f.label);
+  const languageField = f.path.match(/^languages\.(\d+)\.level$/);
+  if (languageField) {
+    const language = S.profile?.languages?.[+languageField[1]];
+    const name = (S.uiLanguage === 'en' ? language?.languageEn : language?.language) || language?.language || String(+languageField[1] + 1);
+    label = tr('Niveau — {name}', { name });
+  }
+  return `<div class="profile-field"><label class="field" for="${esc(id)}">${esc(label)}</label>${input}</div>`;
 }
 
 async function saveProfile() {
@@ -647,23 +765,26 @@ async function saveProfile() {
 }
 
 async function reloadProfile() {
-  if (Object.keys(S.profileDraft).length && !confirm('Recharger le profil et abandonner les modifications non enregistrées ?')) return;
+  if (Object.keys(S.profileDraft).length && !confirm(tr('Recharger le profil et abandonner les modifications non enregistrées ?'))) return;
   S.profileDraft = {};
   S.profileRevision = null;
   await renderProfile();
 }
 
-async function renderProfile() {
+async function renderProfile({ refresh = true } = {}) {
   const el = $('#tab-profile');
   if (!S.health) {
-    el.innerHTML = `<div class="card"><h2>Serveur</h2>${serverForm()}</div>`;
+    el.innerHTML = `<div class="card"><h2>${tr('Serveur')}</h2>${serverForm()}</div>`;
     return;
   }
   let data;
   try {
-    [S.memory, data] = await Promise.all([api('/memory'), api('/profile')]);
+    if (refresh || !S.profileResponse) {
+      [S.memory, data] = await Promise.all([api('/memory'), api('/profile')]);
+      S.profileResponse = data;
+    } else data = S.profileResponse;
   } catch (err) {
-    el.innerHTML = `<div class="card"><h2>Profil</h2><div class="small" style="color:var(--bad)">${esc(err.message)}</div><button class="btn" data-action="reloadProfile">Réessayer</button></div>`;
+    el.innerHTML = `<div class="card"><h2>${tr('Profil')}</h2><div class="small" style="color:var(--bad)">${esc(tr(err.message))}</div><button class="btn" data-action="reloadProfile">${tr('Réessayer')}</button></div>`;
     return;
   }
   const dirty = Object.keys(S.profileDraft).length > 0;
@@ -675,37 +796,37 @@ async function renderProfile() {
   }
   const groups = [...new Set(S.profileFields.map((f) => f.group))];
   const editor = S.profileFields.length ? `<form id="profileForm">
-    ${groups.map((group, i) => `<details class="profile-group" ${i < 2 ? 'open' : ''}><summary>${esc(group)}</summary>${S.profileFields.filter((f) => f.group === group).map(profileField).join('')}</details>`).join('')}
-    <div class="profile-save row"><button type="button" class="btn primary" data-action="saveProfile">Enregistrer le profil</button>
-      <button type="button" class="btn" data-action="reloadProfile">Recharger</button></div>
-    </form>` : '<div class="small" style="color:var(--warn)">Redémarre le serveur pour activer l’éditeur de profil.</div>';
+    ${groups.map((group, i) => `<details class="profile-group" ${i < 2 ? 'open' : ''}><summary>${esc(tr(group))}</summary>${S.profileFields.filter((f) => f.group === group).map(profileField).join('')}</details>`).join('')}
+    <div class="profile-save row"><button type="button" class="btn primary" data-action="saveProfile">${tr('Enregistrer le profil')}</button>
+      <button type="button" class="btn" data-action="reloadProfile">${tr('Recharger')}</button></div>
+    </form>` : `<div class="small" style="color:var(--warn)">${tr('Redémarre le serveur pour activer l’éditeur de profil.')}</div>`;
   const h = { ...S.health, warnings: data.warnings || S.health.warnings };
   const mem = Object.entries(S.memory.items || {}).sort((a, b) => String(b[1].lastUsedAt).localeCompare(String(a[1].lastUsedAt)));
   el.innerHTML = `
-    <div class="card"><h2>Profil</h2>
-      <div class="small">Fichier : <span class="kbd">${esc(h.profileFile)}</span></div>
-      ${h.profileError ? `<div class="small" style="color:var(--bad)">${esc(h.profileError)}</div>` : ''}
-      ${h.warnings?.length ? `<div style="margin-top:8px"><b class="small">À compléter :</b><ul class="warnings">${h.warnings.map((w) => `<li>${esc(w.label)} <span class="muted">(${esc(w.path)})</span></li>`).join('')}</ul></div>` : '<div class="small" style="color:var(--ok);margin-top:6px">Champs essentiels renseignés ✓</div>'}
-      <div class="small muted" style="margin-top:6px">Enregistre ici tes coordonnées, disponibilités et réponses d’admissibilité. Vide / « Je réponds moi-même » = aucune réponse inventée. Sauvegarde privée automatique avant chaque modification.</div>
-      ${conflict ? '<div class="small" style="color:var(--warn)">Le fichier a changé ailleurs. Tes saisies sont conservées ; utilise « Recharger » avant de réessayer.</div>' : ''}
+    <div class="card"><h2>${tr('Profil')}</h2>
+      <div class="small">${tr('Fichier :')} <span class="kbd">${esc(h.profileFile)}</span></div>
+      ${h.profileError ? `<div class="small" style="color:var(--bad)">${esc(tr(h.profileError))}</div>` : ''}
+      ${h.warnings?.length ? `<div style="margin-top:8px"><b class="small">${tr('À compléter')}:</b><ul class="warnings">${h.warnings.map((w) => `<li>${esc(tr(w.label))} <span class="muted">(${esc(w.path)})</span></li>`).join('')}</ul></div>` : `<div class="small" style="color:var(--ok);margin-top:6px">${tr('Champs essentiels renseignés ✓')}</div>`}
+      <div class="small muted" style="margin-top:6px">${tr('Enregistre ici tes coordonnées, disponibilités et réponses d’admissibilité. Vide / « Je réponds moi-même » = aucune réponse inventée. Sauvegarde privée automatique avant chaque modification.')}</div>
+      ${conflict ? `<div class="small" style="color:var(--warn)">${tr('Le fichier a changé ailleurs. Tes saisies sont conservées ; utilise « Recharger » avant de réessayer.')}</div>` : ''}
       ${editor}
-      <div class="small muted">Les expériences et formations détaillées restent dans le YAML. Modifier le profil ne modifie pas les CV PDF ni les lettres déjà générées.</div>
+      <div class="small muted">${tr('Les expériences et formations détaillées restent dans le YAML. Modifier le profil ne modifie pas les CV PDF ni les lettres déjà générées.')}</div>
     </div>
     <div class="card"><h2>CV (${S.cvs.length})</h2>
-      <div class="small">Dossier : <span class="kbd">${esc(h.cvDir || 'non configuré')}</span></div>
-      ${h.cvError ? `<div class="small" style="color:var(--bad)">${esc(h.cvError)}</div>` : ''}
-      <ul class="list">${S.cvs.map((c) => `<li class="small"><b>${esc(c.name)}</b> <span class="badge grey">${esc((c.language || '?').toUpperCase())}</span> ${c.hasTex ? '<span class="badge ok">.tex lu</span>' : '<span class="badge warn">pas de .tex</span>'}${c.tags?.length ? `<div class="muted">Mots-clés : ${esc(c.tags.join(', '))}</div>` : ''}</li>`).join('')}</ul>
+      <div class="small">${tr('Dossier :')} <span class="kbd">${esc(h.cvDir || tr('non configuré'))}</span></div>
+      ${h.cvError ? `<div class="small" style="color:var(--bad)">${esc(tr(h.cvError))}</div>` : ''}
+      <ul class="list">${S.cvs.map((c) => `<li class="small"><b>${esc(c.name)}</b> <span class="badge grey">${esc((c.language || '?').toUpperCase())}</span> ${c.hasTex ? `<span class="badge ok">${tr('.tex lu')}</span>` : `<span class="badge warn">${tr('pas de .tex')}</span>`}${c.tags?.length ? `<div class="muted">${tr('Mots-clés :')} ${esc(c.tags.join(', '))}</div>` : ''}</li>`).join('')}</ul>
     </div>
-    <div class="card"><h2>Réponses mémorisées (${mem.length})</h2>
-      ${mem.length ? `<ul class="list">${mem.map(([k, m]) => `<li class="small"><div class="row"><b class="grow">${esc(m.label)}</b><button class="btn ghost danger" data-forget="${esc(k)}">✕</button></div><div>${esc(Array.isArray(m.value) ? m.value.join(', ') : String(m.value))}</div></li>`).join('')}</ul>` : '<div class="small muted">Tes réponses aux questions récurrentes (non couvertes par le profil) seront retenues quand tu passes à l’étape suivante d’un formulaire.</div>'}
+    <div class="card"><h2>${tr('Réponses mémorisées')} (${mem.length})</h2>
+      ${mem.length ? `<ul class="list">${mem.map(([k, m]) => `<li class="small"><div class="row"><b class="grow">${esc(m.label)}</b><button class="btn ghost danger" data-forget="${esc(k)}">✕</button></div><div>${esc(Array.isArray(m.value) ? m.value.join(', ') : String(m.value))}</div></li>`).join('')}</ul>` : `<div class="small muted">${tr('Tes réponses aux questions récurrentes (non couvertes par le profil) seront retenues quand tu passes à l’étape suivante d’un formulaire.')}</div>`}
     </div>
-    <div class="card"><h2>Serveur</h2>${serverForm()}
-      <div class="small muted" style="margin-top:6px">pi : ${esc(h.pi)} · Chrome (PDF) : ${h.chrome ? 'OK' : 'introuvable'}</div></div>`;
+    <div class="card"><h2>${tr('Serveur')}</h2>${serverForm()}
+      <div class="small muted" style="margin-top:6px">pi : ${esc(h.pi)} · Chrome (PDF) : ${h.chrome ? 'OK' : tr('introuvable')}</div></div>`;
 }
 
 function serverForm() {
-  return `<div class="row"><input type="url" id="serverUrl" value="${esc(S.server)}" class="grow" style="width:auto">
-    <button class="btn" data-action="saveServer">Enregistrer</button></div>`;
+  return `<div class="row"><input type="url" id="serverUrl" value="${esc(S.serverDraft ?? S.server)}" class="grow" style="width:auto">
+    <button class="btn" data-action="saveServer">${tr('Enregistrer')}</button></div>`;
 }
 
 function switchTab(name) {
@@ -761,11 +882,13 @@ const ACTIONS = {
   },
   newApp: () => setActiveApp(null),
   fill: () => fillPage(),
+  stopFill: () => stopFill(),
   memorize: () => captureMemory(),
   submitted: () => markSubmitted(),
   exportCsv: () => chrome.tabs.create({ url: `${S.server}/journal.csv` }),
   saveServer: async () => {
     S.server = ($('#serverUrl').value || DEFAULT_SERVER).replace(/\/+$/, '');
+    S.serverDraft = null;
     await chrome.storage.local.set({ serverUrl: S.server });
     await checkServer();
     toast(S.health ? 'Serveur connecté ✓' : 'Serveur injoignable', S.health ? '' : 'error');
@@ -796,7 +919,7 @@ document.addEventListener('click', async (e) => {
     }
     if (t.dataset.delete) {
       const a = S.apps.find((x) => x.id === t.dataset.delete);
-      if (!confirm(`Supprimer la candidature « ${a?.company || ''} — ${a?.title || ''} » et sa lettre ?`)) return;
+      if (!confirm(tr('Supprimer la candidature « {name} » et sa lettre ?', { name: `${a?.company || ''} — ${a?.title || ''}` }))) return;
       await api(`/applications/${encodeURIComponent(t.dataset.delete)}`, { method: 'DELETE' });
       if (S.app?.id === t.dataset.delete) await setActiveApp(null);
       await loadApps();
@@ -818,6 +941,8 @@ document.addEventListener('submit', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'letterInstructions') S.letterInstructions = e.target.value;
+  if (e.target.id === 'serverUrl') S.serverDraft = e.target.value;
   if (e.target.dataset.profilePath) S.profileDraft[e.target.dataset.profilePath] = e.target.value;
   if (e.target.id === 'letterSubject' || e.target.id === 'letterBody') {
     S.draft = S.draft || { subject: '', body: '' };
@@ -834,7 +959,9 @@ document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.dataset.profilePath) S.profileDraft[t.dataset.profilePath] = t.value;
   try {
-    if (t.id === 'cvSelect') {
+    if (t.id === 'uiLanguage') {
+      await setUiLanguage(t.value);
+    } else if (t.id === 'cvSelect') {
       await patchApp({ cvId: t.value });
       toast('CV choisi ✓');
     } else if (t.id === 'pickApp' && t.value) {
@@ -858,14 +985,30 @@ document.addEventListener('change', async (e) => {
   }
 });
 
-chrome.tabs.onActivated.addListener(() => schedulePageRefresh(150));
+chrome.tabs.onActivated.addListener(async () => {
+  const tab = await activeTab();
+  if (S.fillRun && tab?.id !== S.fillRun.tabId) stopFill({ pageChanged: true });
+  schedulePageRefresh(150);
+});
 chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (S.fillRun?.tabId === tabId && (info.url || info.status === 'loading')) stopFill({ pageChanged: true });
   const tab = await activeTab();
   if (tab?.id === tabId && (info.status === 'complete' || info.url)) schedulePageRefresh(600);
 });
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === 'ap:pageChanged') schedulePageRefresh(300);
-  if (msg?.type === 'ap:memorySaved' && msg.added) toast(`${msg.added} réponse(s) mémorisée(s) pour les prochaines fois`);
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg?.type === 'ap:fillCancelled' && msg.runId === S.fillRun?.id) stopFill({ pageChanged: true });
+  if (msg?.type === 'ap:pageChanged') {
+    if (sender?.tab?.id === S.fillRun?.tabId && msg.pageIdentity && S.fillRun.pages?.some((p) => p.frameId === sender.frameId && p.pageIdentity !== msg.pageIdentity)) stopFill({ pageChanged: true });
+    schedulePageRefresh(300);
+  }
+  if (msg?.type === 'ap:memorySaved' && msg.added) toast(tr('{count} réponse(s) mémorisée(s) pour les prochaines fois', { count: msg.added }));
+});
+window.addEventListener('pagehide', () => {
+  if (S.fillRun) {
+    const run = S.fillRun;
+    run.controller.abort();
+    exec(run.tabId, 'cancel', { runId: run.id }, run.pages?.map((p) => p.frameId)).catch(() => {});
+  }
 });
 window.addEventListener('focus', () => {
   if (!S.health) checkServer();
@@ -878,7 +1021,9 @@ setInterval(() => {
 // Démarrage
 // ---------------------------------------------------------------------------
 (async function init() {
-  const stored = await chrome.storage.local.get(['serverUrl', 'prefs', 'activeAppId']);
+  const stored = await chrome.storage.local.get(['serverUrl', 'prefs', 'activeAppId', 'uiLanguage']);
+  S.uiLanguage = chooseLanguage(stored.uiLanguage, navigator.language);
+  renderShell();
   S.server = (stored.serverUrl || DEFAULT_SERVER).replace(/\/+$/, '');
   S.prefs = { ...S.prefs, ...(stored.prefs || {}) };
   renderApp();

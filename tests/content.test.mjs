@@ -9,7 +9,7 @@ import { launchBrowser } from '../server/src/pdf.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIX = path.join(ROOT, 'tests', 'fixtures');
 const OUT = path.join(ROOT, 'tests', 'output');
-const CONTENT = ['dom.js', 'extract.js', 'fields.js', 'widgets.js', 'mapping.js', 'workday.js', 'main.js'].map((f) =>
+const CONTENT = ['../i18n.js', 'dom.js', 'extract.js', 'fields.js', 'widgets.js', 'mapping.js', 'workday.js', 'main.js'].map((f) =>
   path.join(ROOT, 'extension', 'content', f),
 );
 
@@ -239,6 +239,27 @@ async function main() {
     check('annonce ARIA cachée non confondue avec une pastille', (await page.evaluate(() => ApplyPilot.selectedPromptItems(document.getElementById('skills-field')))).length === 0);
     check('un échec de widget skills ne déclenche pas une invention par l’IA', !onlyIgnored.unresolved.some((f) => /skills/i.test(f.label)));
     check('aucun bouton Suivant ou Soumettre cliqué', (await page.evaluate(() => window.navigationClicks)) === 0);
+
+    console.log('Cancellation — stop pending widgets and reject stale AI answers');
+    await load(page, 'workday-skills.html');
+    await page.evaluate(() => skillFixture.seed(['Git']));
+    const scope = await run(page, 'detect');
+    await page.evaluate((payload) => { window.stoppingPromise = __applyPilot.run('fill', payload); }, { ...strictPayload, runId: 'cancel-widget', expectedPage: scope.pageIdentity });
+    await page.waitForFunction(() => document.querySelector('#skills-input')?.value?.length > 0, { polling: 50, timeout: 5000 });
+    await run(page, 'cancel', { runId: 'cancel-widget' });
+    const stopped = await page.evaluate(() => window.stoppingPromise);
+    check('cancel interrupts a pending Workday skills search', stopped.cancelled === true);
+    check('stopping preserves existing skill pills without selecting later options', (await page.evaluate(() => skillFixture.selected())).join('|') === 'Git');
+    const cityId = await page.evaluate(() => ApplyPilot.scanFields().find((f) => f.el.id === 'home-city').id);
+    const cityBefore = await val(page, '#home-city');
+    const staleCancelled = await run(page, 'fillValues', { ...strictPayload, runId: 'cancel-widget', expectedPage: scope.pageIdentity, answers: { [cityId]: { value: 'Wrong city', confidence: 1 } } });
+    check('a late response from a cancelled run can never write a field', staleCancelled.cancelled === true && (await val(page, '#home-city')) === cityBefore);
+    await page.$eval('[data-automation-id="progressBarActiveStep"]', (e) => { e.textContent = 'current step 3 of 5 Application Questions'; });
+    const staleStep = await run(page, 'fillValues', { ...strictPayload, runId: 'late-old-step', expectedPage: scope.pageIdentity, answers: { [cityId]: { value: 'Wrong city', confidence: 1 } } });
+    check('same URL, different Workday step rejects old AI answers', staleStep.cancelled === true && (await val(page, '#home-city')) === cityBefore);
+    const nextScope = await run(page, 'detect');
+    const resumedFill = await run(page, 'fillValues', { ...strictPayload, runId: 'new-step', expectedPage: nextScope.pageIdentity, answers: { [cityId]: { value: 'Ottawa', confidence: 1 } } });
+    check('a new run on the next step is not blocked by an earlier cancellation', !resumedFill.cancelled && (await val(page, '#home-city')) === 'Ottawa');
 
     console.log('Workday — Langues et sites Web (page en arrière-plan, listes Canvas Kit)');
     await load(page, 'workday-langues.html');

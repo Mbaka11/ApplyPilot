@@ -1,16 +1,18 @@
-# Profil ApplyPilot : tout ce que tu retapes à chaque candidature.
-# Copié en profile.yaml au premier démarrage. profile.yaml est PRIVÉ (jamais publié sur git).
-# Laisse une valeur vide ("") ou null si tu ne veux pas qu'elle soit remplie automatiquement.
+# ApplyPilot profile: information you would otherwise enter on every application.
+# Copied to profile.yaml on first start. profile.yaml is PRIVATE and excluded from Git.
+# Replace these examples with your own verified facts before autofilling any real form.
+# Blank ("") or null means unknown / do not fill automatically.
+# FR/EN matching values below are intentional; interface language never rewrites them.
 
-headline: Étudiant en génie logiciel — Data Science / ML
+headline: Software engineering student — Data Science / ML
 summary: >-
-  Courte présentation (2-3 phrases) réutilisée par l'IA.
+  Your short introduction (2–3 sentences), reused by the model.
 
 identity:
-  firstName: Prénom
-  lastName: Nom
+  firstName: First
+  lastName: Last
   preferredName: ""
-  email: prenom.nom@example.com
+  email: first.last@example.com
   phone: "514-555-0123"
   phoneCountryCode: "+1"
   phoneCountry: Canada
@@ -25,43 +27,43 @@ identity:
     country: Canada
 
 links:
-  linkedin: https://www.linkedin.com/in/ton-profil/
-  github: https://github.com/ton-compte
+  linkedin: https://www.linkedin.com/in/your-profile/
+  github: https://github.com/your-account
   portfolio: ""
 
-# Réponses aux questions d'admissibilité (true / false / null = je réponds moi-même)
+# Eligibility: true / false / null (null = answer manually).
 workAuthorization:
   citizenship: ""
   canada:
     authorizedToWork: null
     needsSponsorship: null
-    status: "" # ex. Citoyen canadien, Résident permanent, Permis d'études + permis de travail coop
+    status: "" # e.g. citizen, permanent resident, study permit + co-op work permit
   us:
     authorizedToWork: null
     needsSponsorship: null
 
 student:
-  currentlyEnrolled: true
+  currentlyEnrolled: true # Example only: confirm your own enrollment.
   program: Baccalauréat en génie logiciel (Polytechnique Montréal)
   programEn: Bachelor of Software Engineering (Polytechnique Montréal)
   level: Baccalauréat
-  expectedGraduation: "" # AAAA-MM
+  expectedGraduation: "" # YYYY-MM
   returningToSchoolAfterInternship: null
-  creditedInternship: null # true si ton programme crédite le stage (questions « stage crédité »)
+  creditedInternship: null # true only if your program credits this internship
 
-# Pièces jointes supplémentaires (chemins complets). Le relevé est joint aux champs « relevé de notes ».
+# Additional attachments: full paths. Attach only a transcript you have verified.
 documents:
-  transcript: "" # ex. C:/Users/moi/Documents/releve_de_notes.pdf
+  transcript: "" # e.g. C:/Users/you/Documents/transcript.pdf
 
 availability:
-  term: "" # ex. Été 2027
-  termEn: "" # ex. Summer 2027
-  startDate: "" # AAAA-MM-JJ
+  term: "" # e.g. Été 2027 (French value)
+  termEn: "" # e.g. Summer 2027 (English value)
+  startDate: "" # YYYY-MM-DD
   endDate: ""
   durationMonths: null
-  fullTime: true
+  fullTime: true # Example only: confirm your own availability.
   willingToRelocate: null
-  workMode: "" # sur place / hybride / télétravail
+  workMode: "" # on-site / hybrid / remote
 
 preferences:
   howDidYouHear: LinkedIn
@@ -69,6 +71,7 @@ preferences:
   salaryExpectation: ""
   referral: ""
 
+# Example standard answers: verify each one before using your profile.
 standardAnswers:
   over18: true
   relativesAtCompany: false
@@ -76,7 +79,7 @@ standardAnswers:
   conflictOfInterest: false
   willingToTravel: null
 
-# Déclarations volontaires (équité en emploi). « prefer not » = « Je ne souhaite pas répondre ».
+# Voluntary disclosures: "prefer not" selects the option declining to answer.
 voluntaryDisclosures:
   gender: prefer not
   pronouns: prefer not
@@ -87,7 +90,7 @@ voluntaryDisclosures:
   veteran: prefer not
   sexualOrientation: prefer not
 
-# Du plus récent au plus ancien (même ordre que dans Workday).
+# Most recent first, matching Workday's order. Sample education, not your facts.
 education:
   - school: Polytechnique Montréal
     schoolSearch: [Polytechnique Montréal, École Polytechnique de Montréal]
@@ -104,17 +107,17 @@ education:
 
 experience:
   - title: Software Developer Intern
-    company: Entreprise
+    company: Example Company
     companyAliases: []
-    location: ""
+    location: "" # Professional location; never inferred from your home city.
     start: 2025-05
     end: 2025-08
     current: false
-    description: Une phrase sur ce que tu as accompli.
+    description: One sentence describing an accomplishment.
     technologies: [Python]
 
 projects:
-  - name: Projet perso
+  - name: Personal project
     url: ""
     description: ""
 
@@ -123,12 +126,12 @@ skills: [Python, SQL, Git]
 languages:
   - language: Français
     languageEn: French
-    level: "" # natif / courant / avancé / intermédiaire / notions
+    level: "" # native / fluent / advanced / intermediate / basic (FR synonyms also supported)
   - language: Anglais
     languageEn: English
-    level: ""
+    level: "" # Do not infer proficiency from your interface language.
 
 letter:
-  signatureName: Prénom Nom
-  tone: professionnel, direct et concret, sans clichés
+  signatureName: First Last
+  tone: professional, direct and concrete, without clichés
   extraInstructions: ""

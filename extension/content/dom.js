@@ -16,9 +16,10 @@
     );
 
   /** Attend qu'une fonction renvoie une valeur « vraie » (tableau non vide accepté). */
-  async function waitFor(fn, { timeout = 3000, interval = 80 } = {}) {
+  async function waitFor(fn, { timeout = 3000, interval = 80, checkpoint = () => {} } = {}) {
     const t0 = Date.now();
     for (;;) {
+      checkpoint();
       let v = null;
       try {
         v = fn();
@@ -258,7 +259,8 @@
   }
 
   /** Simule la frappe caractère par caractère (pour les champs de recherche et composants exigeants). */
-  async function typeText(el, text, { clear = true, delay = 0 } = {}) {
+  async function typeText(el, text, { clear = true, delay = 0, checkpoint = () => {} } = {}) {
+    checkpoint();
     focus(el);
     if (clear && el.value) {
       setNativeValue(el, '');
@@ -266,6 +268,7 @@
     }
     let cur = clear ? '' : el.value || '';
     for (const ch of String(text)) {
+      checkpoint();
       key(el, 'keydown', ch);
       key(el, 'keypress', ch);
       cur += ch;
@@ -274,10 +277,12 @@
       key(el, 'keyup', ch);
       if (delay) await sleep(delay);
     }
+    checkpoint();
   }
 
   /** Affecte une valeur à un input/textarea contrôlé (React & co.), avec repli sur la frappe simulée. */
-  async function setValue(el, value, { blur: leave = true } = {}) {
+  async function setValue(el, value, { blur: leave = true, checkpoint = () => {} } = {}) {
+    checkpoint();
     const v = String(value ?? '');
     focus(el);
     setNativeValue(el, v);
@@ -285,12 +290,14 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
     if (leave) blur(el);
     await sleep(40);
+    checkpoint();
     if (el.value !== v) {
-      await typeText(el, v);
+      await typeText(el, v, { checkpoint });
       el.dispatchEvent(new Event('change', { bubbles: true }));
       if (leave) blur(el);
       await sleep(40);
     }
+    checkpoint();
     return el.value;
   }
 
