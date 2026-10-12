@@ -221,7 +221,7 @@ async function main() {
     await panel.click('[data-action="fill"]');
     await panel.waitForFunction(() => !document.querySelector('#fillCard .busy') && !!document.querySelector('#fillCard .summary'), { timeout: 60000 });
     const uploaded = await site.$$eval('#uploaded li', (els) => els.map((e) => e.textContent));
-    check('CV joint depuis le serveur', uploaded.length === 1 && /Marie_Tremblay_CV_FR\.pdf/.test(uploaded[0]), uploaded.join(' | '));
+    check('CV joint depuis le serveur, sous un nom neutre', uploaded.length === 1 && /^Marie_Tremblay_CV\.pdf/.test(uploaded[0]), uploaded.join(' | '));
 
     // Lettre : écrite via l'API (sans IA), puis modifiée dans le panneau.
     const apiBase = `http://127.0.0.1:${API_PORT}`;

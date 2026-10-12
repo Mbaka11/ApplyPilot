@@ -247,6 +247,7 @@ Posting End Date 2026-10-14`,
     if (cvId) {
       const pdf = await api('GET', `/cvs/${encodeURIComponent(cvId)}/pdf?base64=1`);
       check('CV en base64', pdf.status === 200 && pdf.data.base64?.length > 1000, pdf.data.name);
+      check('nom de CV neutre à l’envoi (pas celui de la variante)', pdf.data.name === 'Marie_Tremblay_CV.pdf', pdf.data.name);
     }
 
     console.log('Candidature');

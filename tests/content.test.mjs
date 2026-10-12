@@ -106,6 +106,8 @@ async function main() {
     check('clé Workday : offre = formulaire', keys[0] === keys[1], keys[0]);
     check('clé Lever : offre = /apply', keys[2] === keys[3], keys[2]);
     check('clé Greenhouse', keys[4] === keys[5], keys[4]);
+    const owners = await page.evaluate(() => ['Date Posted:\n2026-10-08\n\nÀ propos de Pratt & Whitney Canada\nPratt & Whitney Canada (P&WC) est un leader', 'About the role\nYou will', "À propos de l'équipe\nNous"].map((d) => window.ApplyPilot.companyFromDescription(d)));
+    check('employeur lu dans « À propos de … » (portail de groupe RTX)', owners[0] === 'Pratt & Whitney Canada' && !owners[1] && !owners[2], JSON.stringify(owners));
 
     console.log('Workday — Connexion');
     await load(page, 'workday-login.html');

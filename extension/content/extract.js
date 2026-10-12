@@ -146,6 +146,17 @@
     return prettyName(meaningful[0] || parts[0]);
   }
 
+  /**
+   * « À propos de Pratt & Whitney Canada » / « About Acme » en tête d'offre : utile quand la page ne donne
+   * pas l'employeur (portail Workday d'un groupe, ex. « globalhr » pour RTX).
+   */
+  function companyFromDescription(desc) {
+    const m = /(?:^|\n)[ \t]*(?:\u00e0 propos de|a propos de|about)[ \t]+([A-Z\u00c0-\u00dd0-9&][^\n:.,(]{1,60}?)[ \t]*(?=\n|:|\.|,|\()/i.exec(String(desc || '').slice(0, 4000));
+    if (!m) return '';
+    const name = m[1].replace(/^&\s*/, '').trim();
+    return /^(l['\u2019]|(us|nous|vous|toi|you|the|this|our|la|le poste|ce poste|cette)(\b|\s|$))/i.test(name) ? '' : name;
+  }
+
   const KEYWORDS =
     /responsibilit|qualification|requirement|exigence|responsabilit|profil recherch|compétence|competenc|what you|you will|vous (allez|ferez|aurez)|mission|about the role|your role|votre rôle|nous recherchons|we are looking|ce que nous offrons|what we offer|atouts|nice to have/gi;
 
@@ -253,7 +264,7 @@
       source: ld ? 'json-ld' : wd ? 'workday' : 'generic',
     };
     if (!job.description || job.description.length < 200) job.description = genericDescription();
-    if (!job.company) job.company = job.companyGuess;
+    if (!job.company) job.company = companyFromDescription(job.description) || job.companyGuess;
     job.language = detectLanguage(`${job.title}\n${job.description}`);
     job.isPosting = isPostingPage(job);
     return job;
@@ -275,5 +286,5 @@
     return { title, company, isPosting };
   }
 
-  Object.assign(AP, { platform, htmlToText, extractJob, quickJob, jobKey, detectLanguage, companyFromUrl });
+  Object.assign(AP, { platform, htmlToText, extractJob, quickJob, jobKey, detectLanguage, companyFromUrl, companyFromDescription });
 })();

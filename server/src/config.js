@@ -45,6 +45,9 @@ export const DEFAULTS = {
   },
   fill: {
     attachLetterWithCv: true,
+    // Nom du CV envoyé aux employeurs ({first}, {last}, {lang}) : jamais celui d'une variante
+    // (« CV_FR_La_Caisse_Quant.pdf » trahirait une candidature ciblée ailleurs). Vide = nom d'origine.
+    cvFileName: '{first}_{last}_CV.pdf',
   },
 };
 

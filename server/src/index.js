@@ -33,7 +33,7 @@ import {
   saveApplication,
   summary,
 } from './store.js';
-import { detectLanguage, ensureDir, escapeHtml, writeText } from './util.js';
+import { detectLanguage, ensureDir, escapeHtml, safeFileName, writeText } from './util.js';
 
 const require = createRequire(import.meta.url);
 const VERSION = require('../package.json').version;
@@ -141,6 +141,26 @@ function loadStyleRefs(cfg) {
     .slice(0, 3)
     .map((f) => ({ name: f, text: fs.readFileSync(path.join(dir, f), 'utf8').trim() }))
     .filter((r) => r.text);
+}
+
+/** Nom neutre du CV joint aux formulaires (fill.cvFileName), pour ne pas exposer le nom d'une variante. */
+function cvUploadName(cv) {
+  const pattern = getConfig().fill?.cvFileName;
+  if (!pattern) return cv.file;
+  let id = {};
+  try {
+    id = getProfile().identity || {};
+  } catch {
+    /* profil illisible : nom d'origine */
+  }
+  if (!id.firstName && !id.lastName) return cv.file;
+  const name = String(pattern)
+    .replace(/\{first\}/g, safeFileName(id.firstName || '', 30))
+    .replace(/\{last\}/g, safeFileName(id.lastName || '', 30))
+    .replace(/\{lang\}/g, String(cv.language || '').toUpperCase())
+    .replace(/_+/g, '_')
+    .replace(/^_|_(?=\.pdf$)/gi, '');
+  return /\.pdf$/i.test(name) ? name : `${name}.pdf`;
 }
 
 function requirementsFor(app) {
@@ -262,7 +282,7 @@ route('GET', '/cvs/:id/pdf', ({ params, query, res }) => {
   const { cvs } = listCvs(getConfig());
   const cv = cvs.find((c) => c.id === params.id);
   if (!cv) throw new HttpError(404, `CV introuvable : ${params.id}`);
-  if (query.get('base64')) return fileAsBase64(cv.pdfPath, cv.file);
+  if (query.get('base64')) return fileAsBase64(cv.pdfPath, cvUploadName(cv));
   sendFile(res, cv.pdfPath, { type: 'application/pdf', downloadName: cv.file });
   return undefined;
 });

@@ -55,3 +55,6 @@ fill:
   # Joint aussi la lettre dans le champ « CV » s'il accepte plusieurs fichiers
   # et qu'il n'existe pas de champ dédié à la lettre.
   attachLetterWithCv: true
+  # Nom du CV joint aux formulaires ({first}, {last}, {lang}). Évite d'exposer le nom d'une
+  # variante (ex. « CV_FR_La_Caisse_Quant.pdf »). Vide = nom du fichier d'origine.
+  cvFileName: "{first}_{last}_CV.pdf"

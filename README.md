@@ -127,6 +127,7 @@ L’éditeur couvre aussi le **stage crédité**, les **niveaux de langue** (nat
 | `letter.paper`, `letter.showHeader` | Format (Letter/A4) et en-tête nom + coordonnées |
 | `letter.fileNameFr` / `fileNameEn` | Nom du PDF, ex. `{first}_{last}_Lettre_de_motivation_{company}.pdf` |
 | `fill.attachLetterWithCv` | Joint aussi la lettre dans le champ CV s'il accepte plusieurs fichiers |
+| `fill.cvFileName` | Nom du CV envoyé (`{first}_{last}_CV.pdf` par défaut) : le nom d’une variante ciblée n’est jamais exposé |
 
 ## Dépannage
 
