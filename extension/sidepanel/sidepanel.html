@@ -13,12 +13,14 @@
     </header>
     <div class="language-bar">
       <button type="button" id="headerStop" class="btn danger hidden" data-action="stopFill">Stop</button>
+      <button type="button" id="headerSearchStop" class="btn danger hidden">Stop search</button>
       <label id="uiLanguageLabel" for="uiLanguage">Interface language</label>
       <select id="uiLanguage"><option value="en">English</option><option value="fr">Français</option></select>
     </div>
 
     <nav class="tabs">
       <button data-tab="app" class="active">Application</button>
+      <button data-tab="search">Search</button>
       <button data-tab="journal">Tracker</button>
       <button data-tab="profile">Profile</button>
     </nav>
@@ -31,6 +33,7 @@
         <div id="letterCard" class="card"></div>
         <div id="fillCard" class="card"></div>
       </section>
+      <section id="tab-search" class="tab"></section>
       <section id="tab-journal" class="tab"></section>
       <section id="tab-profile" class="tab"></section>
     </main>

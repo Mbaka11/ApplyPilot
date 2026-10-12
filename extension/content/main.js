@@ -1,7 +1,8 @@
 // ApplyPilot — point d'entrée des scripts de contenu : commandes appelées par le panneau latéral.
 (() => {
+  if (/(^|\.)linkedin\.com\.?$|(^|\.)google\.(com|ca|fr|co\.uk)\.?$/.test(location.hostname)) return;
   const AP = globalThis.ApplyPilot;
-  AP.VERSION = '0.4.0';
+  AP.VERSION = '0.5.0';
   AP.frameToken = AP.frameToken || Math.random().toString(36).slice(2, 6);
 
   AP.cancelledRuns = AP.cancelledRuns || new Set();

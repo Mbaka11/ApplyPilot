@@ -1,0 +1,164 @@
+// Invoked by the extension E2E suite. Every newly opened discovery tab is first
+// held at about:blank, then intercepted BEFORE its first network navigation.
+import fs from 'node:fs';
+import path from 'node:path';
+
+export async function testSearch({ browser, panel, site, sw, apiBase, out, check }) {
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const request = (route, method = 'GET', body) => fetch(apiBase + route, { method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }).then(r => r.json());
+  const set = (selector, value) => panel.$eval(selector, (el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, value);
+  const known = new Set(browser.targets());
+  const owned = [], navigations = [];
+  const fixture = fs.readFileSync(new URL('./fixtures/google-results.html', import.meta.url), 'utf8');
+  let mode = 'ready';
+  await panel.exposeFunction('__prepareDiscoveryTab', async id => {
+    const target = await browser.waitForTarget(t => t.type() === 'page' && !known.has(t), { timeout: 10000 });
+    known.add(target);
+    const page = await target.page();
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      if (!req.isNavigationRequest() || req.frame() !== page.mainFrame()) return void req.abort().catch(() => {});
+      navigations.push({ id, url: req.url() });
+      const google = new URL(req.url()).hostname === 'www.google.com';
+      const body = !google ? '<!doctype html><meta charset="utf-8"><h1>Manually viewed LinkedIn fixture</h1><p>PRIVATE_FIXTURE_NOT_FOR_COLLECTION</p>'
+        : mode === 'challenge' ? '<!doctype html><meta charset="utf-8"><form action="/sorry/"><h1>Verify you are human</h1></form>'
+        : mode === 'loading' ? '<!doctype html><meta charset="utf-8"><main>Waiting for synthetic results</main>' : fixture;
+      req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body }).catch(() => {});
+    });
+    owned.push({ id, page });
+  });
+  await panel.evaluate(() => {
+    globalThis.__originalSearchCreate = chrome.tabs.create.bind(chrome.tabs);
+    globalThis.__originalSearchQuery = chrome.tabs.query.bind(chrome.tabs);
+    chrome.tabs.create = async options => {
+      const tab = await globalThis.__originalSearchCreate({ ...options, url: 'about:blank' });
+      await globalThis.__prepareDiscoveryTab(tab.id);
+      if (options.url && options.url !== 'about:blank') await chrome.tabs.update(tab.id, { url: options.url });
+      return chrome.tabs.get(tab.id);
+    };
+  });
+  const appsBefore = JSON.stringify((await request('/applications')).applications);
+  const profileBefore = fs.readFileSync(path.join(out, 'profile.yaml'), 'utf8');
+  await site.evaluate(() => { globalThis.discoveryUnsaved = 'untouched-form'; });
+  const fieldsBefore = await site.$$eval('input, textarea, select', els => els.map(el => [el.id, el.value]));
+  await panel.setViewport({ width: 420, height: 1000 });
+  await panel.click('[data-tab="profile"]');
+  await panel.waitForSelector('[data-profile-path="identity.address.city"]');
+  await set('[data-profile-path="identity.address.city"]', 'Unsaved profile search draft');
+  await panel.click('[data-tab="app"]');
+  await set('#letterSubject', 'Unsaved letter search draft');
+  await panel.click('[data-tab="search"]');
+  await panel.waitForSelector('#searchKeywords');
+  check('search defaults cover AI/software/data/consulting and editable internship keywords', (await panel.$$eval('[data-search-category]:checked', els => els.length)) === 4 && (await panel.$eval('#searchKeywords', el => el.value)).includes('internship'));
+  await set('#searchKeywords', 'co-op, stage, intern');
+  await set('#searchTerm', 'Summer 2027');
+  await set('#searchMaxPages', '2');
+  await set('#searchLinks', 'https://www.linkedin.com/jobs/view/8765432100');
+  await set('#searchManual-title', 'Titre manuel conservé');
+  await panel.select('#uiLanguage', 'fr');
+  await panel.waitForFunction(() => document.querySelector('[data-search-action="start"]')?.textContent === 'Chercher sur Google');
+  check('French search UI preserves filters and manual drafts', (await panel.$eval('#searchKeywords', el => el.value)) === 'co-op, stage, intern' && (await panel.$eval('#searchManual-title', el => el.value)) === 'Titre manuel conservé');
+  await panel.select('#uiLanguage', 'en');
+  await panel.waitForFunction(() => document.querySelector('[data-search-action="start"]')?.textContent === 'Search Google');
+  check('search labels are English without translating term or imported text', (await panel.$eval('#tab-search', el => el.textContent)).includes('Software / Programming') && (await panel.$eval('#searchTerm', el => el.value)) === 'Summer 2027' && (await panel.$eval('#searchManual-title', el => el.value)) === 'Titre manuel conservé');
+  await panel.click('[data-search-action="saveSettings"]');
+  await panel.waitForFunction(() => document.querySelector('#searchProgress')?.textContent.includes('Filters saved.'));
+  check('saving filters preserves an unsaved import', (await panel.$eval('#searchLinks', el => el.value)).includes('8765432100'));
+  await set('#searchManual-title', 'Machine Learning Intern — Summer 2027');
+  await set('#searchManual-company', 'Nordic Analytics');
+  await set('#searchManual-location', 'Montréal · Hybrid');
+  await set('#searchManual-employerUrl', 'https://careers.example.org/internships/ml-2027');
+  await set('#searchManual-description', 'Fictional manual import. Python and ML evaluation internship in Montréal, Summer 2027.');
+  await panel.click('[data-search-action="import"]');
+  await panel.waitForFunction(() => document.querySelectorAll('[data-discovery-id]').length === 1);
+  check('manual LinkedIn import does not open a tab, scrape or create an application', owned.length === 0 && JSON.stringify((await request('/applications')).applications) === appsBefore);
+  await panel.click('[data-search-action="start"]');
+  await panel.waitForFunction(() => document.querySelector('#searchProgress')?.textContent.includes('Search complete.'), { timeout: 20000 });
+  const catalog = await request('/search');
+  check('real extension collector processes two intercepted Google pages in one owned tab', owned.length === 1 && navigations.length === 2 && navigations.every(n => new URL(n.url).hostname === 'www.google.com'), await panel.$eval('#searchProgress', el => el.textContent));
+  check('Google discoveries deduplicate and keep reviewed manual details', catalog.jobs.length === 4 && catalog.jobs.find(job => job.employerUrl)?.title === 'Machine Learning Intern — Summer 2027');
+  check('search leaves the application count and stored records unchanged', JSON.stringify((await request('/applications')).applications) === appsBefore);
+  check('search never reloads or changes the pre-existing Workday form', await site.evaluate(() => globalThis.discoveryUnsaved === 'untouched-form') && JSON.stringify(await site.$$eval('input, textarea, select', els => els.map(el => [el.id, el.value]))) === JSON.stringify(fieldsBefore));
+  const firstId = catalog.jobs[0].id;
+  await panel.click(`[data-search-id="${firstId}"][data-search-action="save"]`);
+  await panel.waitForFunction(id => document.querySelector(`[data-discovery-id="${id}"] [data-search-action="unsave"]`), {}, firstId);
+  check('saving an offer is a catalog status, not an application', (await request('/search')).jobs.find(job => job.id === firstId).status === 'saved' && JSON.stringify((await request('/applications')).applications) === appsBefore);
+  const hiddenId = catalog.jobs.find(job => job.url.includes('data-engineering')).id;
+  await panel.click(`[data-search-id="${hiddenId}"][data-search-action="hide"]`);
+  await panel.waitForFunction(id => !document.querySelector(`[data-discovery-id="${id}"]`), {}, hiddenId);
+  await panel.select('#searchState', 'hidden');
+  check('hidden discoveries remain available through the catalog filter', (await panel.$$('[data-discovery-id]')).length === 1);
+  await panel.click(`[data-search-id="${hiddenId}"][data-search-action="restore"]`);
+  await panel.waitForFunction(() => document.querySelectorAll('[data-discovery-id]').length === 0);
+  await panel.select('#searchState', 'visible');
+  check('restored discoveries return without duplicated records', (await panel.$$('[data-discovery-id]')).length === 4);
+  await set('#searchText', 'Nordic');
+  check('catalog title/company/location filter is local', (await panel.$$('[data-discovery-id]')).length === 1);
+  await set('#searchText', '');
+  await request('/search/import', 'POST', { links: 'https://jobs.example.org/injection-fixture', details: { title: '<img src=x onerror="window.searchInjected=true">' } });
+  await panel.click('[data-search-action="reload"]');
+  await panel.waitForFunction(() => document.querySelectorAll('[data-discovery-id]').length === 5);
+  check('untrusted imported titles are escaped rather than executed', await panel.evaluate(() => !globalThis.searchInjected && !document.querySelector('#searchJobs img') && document.querySelector('#searchJobs').textContent.includes('<img src=x')));
+  const untrusted = (await request('/search')).jobs.find(job => job.url.includes('injection-fixture'));
+  panel.once('dialog', dialog => dialog.accept());
+  await panel.click(`[data-search-id="${untrusted.id}"][data-search-action="delete"]`);
+  await panel.waitForFunction(() => document.querySelectorAll('[data-discovery-id]').length === 4);
+  await panel.setViewport({ width: 320, height: 1000 });
+  check('discovery controls and long URLs fit a 320px side panel', await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await panel.setViewport({ width: 420, height: 1000 });
+  await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
+  await panel.screenshot({ path: path.join(out, 'search-en.png'), fullPage: true });
+  await panel.click('[data-search-action="linkedin"]');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const linkedTab = owned.at(-1);
+  const linkedUrl = new URL((await sw.evaluate(id => chrome.tabs.get(id), linkedTab.id)).url);
+  check('LinkedIn search is a prepared user-opened link, with no collector', linkedUrl.hostname === 'www.linkedin.com' && linkedUrl.searchParams.get('location') === 'Greater Montreal Metropolitan Area');
+  // Exercise the normal active-page detection path on this intercepted LinkedIn tab.
+  await panel.evaluate(id => { chrome.tabs.query = async () => [await chrome.tabs.get(id)]; }, linkedTab.id);
+  await panel.bringToFront();
+  await panel.click('#serverStatus');
+  await panel.waitForFunction(() => document.querySelector('#pageCard')?.textContent.includes('LinkedIn stays manual'), { timeout: 10000 });
+  const linkedScripts = await sw.evaluate(async id => (await chrome.scripting.executeScript({ target: { tabId: id }, func: () => ({ application: !!globalThis.__applyPilot, search: !!globalThis.__applyPilotSearch }) }))[0].result, linkedTab.id);
+  check('LinkedIn is excluded from both auto-injection and panel reinjection', !linkedScripts.application && !linkedScripts.search);
+  await panel.evaluate(() => { chrome.tabs.query = globalThis.__originalSearchQuery; });
+  // A permitted employer page can contain a third-party LinkedIn iframe. A stale
+  // parent script must not trigger all-frame reinjection into that iframe.
+  await site.setRequestInterception(true);
+  site.on('request', req => {
+    if (new URL(req.url()).hostname === 'www.linkedin.com') req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: '<h1>LinkedIn iframe fixture</h1><input value="PRIVATE_IFRAME_FIXTURE">' }).catch(() => {});
+    else if (new URL(req.url()).hostname === '127.0.0.1') req.continue().catch(() => {});
+    else req.abort().catch(() => {});
+  });
+  await site.evaluate(() => { const iframe = document.createElement('iframe'); iframe.id = 'discoveryFrame'; iframe.src = 'https://www.linkedin.com/embed/fixture'; document.body.append(iframe); });
+  await site.waitForFrame(frame => frame.url().includes('linkedin.com/embed/fixture'));
+  const formTab = await sw.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, site.url());
+  await sw.evaluate(async id => chrome.scripting.executeScript({ target: { tabId: id, frameIds: [0] }, func: () => { delete globalThis.__applyPilot; } }), formTab);
+  await panel.click('#serverStatus');
+  await panel.waitForFunction(() => document.querySelector('#pageCard')?.textContent.includes('Workday'), { timeout: 10000 });
+  await sleep(700);
+  const iframeScripts = await sw.evaluate(async id => chrome.scripting.executeScript({ target: { tabId: id, allFrames: true }, func: () => ({ host: location.hostname, application: !!globalThis.__applyPilot }) }), formTab);
+  check('document-bound reinjection updates the employer frame but excludes embedded LinkedIn', iframeScripts.some(frame => frame.result?.host === '127.0.0.1' && frame.result.application) && iframeScripts.some(frame => frame.result?.host === 'www.linkedin.com' && !frame.result.application));
+  await site.evaluate(() => document.querySelector('#discoveryFrame').remove());
+  mode = 'loading';
+  await panel.click('[data-search-action="start"]');
+  await panel.waitForFunction(() => document.querySelector('#searchProgress')?.textContent.includes('Search 1/2'), { timeout: 10000 });
+  await panel.click('[data-tab="profile"]');
+  await panel.waitForSelector('[data-profile-path="identity.address.city"]');
+  await panel.click('#headerSearchStop');
+  check('Stop search is accessible from Profile and immediately restores the UI', await panel.$eval('#headerSearchStop', el => el.classList.contains('hidden')));
+  const stoppedNavigations = navigations.length;
+  await sleep(700);
+  check('Stop prevents the next query and preserves completed catalog entries', navigations.length === stoppedNavigations && (await request('/search')).jobs.length === 4);
+  check('profile drafts survive searching, language changes and switching tabs', (await panel.$eval('[data-profile-path="identity.address.city"]', el => el.value)) === 'Unsaved profile search draft' && fs.readFileSync(path.join(out, 'profile.yaml'), 'utf8') === profileBefore);
+  await panel.click('[data-tab="app"]');
+  check('unsaved cover-letter draft survives discovery workflows', (await panel.$eval('#letterSubject', el => el.value)) === 'Unsaved letter search draft');
+  await panel.click('[data-tab="search"]');
+  await panel.waitForSelector('[data-search-action="start"]:not([disabled])');
+  mode = 'challenge';
+  const beforeChallenge = navigations.length;
+  await panel.click('[data-search-action="start"]');
+  await panel.waitForFunction(() => document.querySelector('#searchProgress')?.textContent.includes('requires verification'), { timeout: 10000 });
+  check('Google verification halts visibly without retry or bypass', navigations.length === beforeChallenge + 1 && (await panel.$eval('#headerSearchStop', el => el.classList.contains('hidden'))));
+  check('all discovery paths preserve the real application state and form sentinel', JSON.stringify((await request('/applications')).applications) === appsBefore && await site.evaluate(() => globalThis.discoveryUnsaved === 'untouched-form'));
+  await panel.evaluate(() => { chrome.tabs.create = globalThis.__originalSearchCreate; chrome.tabs.query = globalThis.__originalSearchQuery; });
+}

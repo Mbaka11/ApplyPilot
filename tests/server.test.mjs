@@ -141,6 +141,30 @@ async function main() {
     });
     check('en-tête Host étranger refusé', rebinding === 403);
 
+    console.log('Catalogue de recherche indépendant');
+    const emptySearch = await api('GET', '/search');
+    check('recherche : valeurs de session sans données personnelles', emptySearch.status === 200 && emptySearch.data.settings.term === 'Summer 2027' && emptySearch.data.jobs.length === 0 && !JSON.stringify(emptySearch.data).includes('marie@example.com'));
+    const deniedSearch = await api('POST', '/search/import', { links: SAMPLE_JOB.url }, { origin: 'https://evil.example.com' });
+    check('recherche : origine étrangère refusée', deniedSearch.status === 403);
+    const searchSettings = await api('PUT', '/search/settings', { ...emptySearch.data.settings, maxPages: 2 });
+    check('recherche : paramètres persistés', searchSettings.status === 200 && searchSettings.data.settings.maxPages === 2);
+    const searchResult = await api('POST', '/search/results', { items: [{ url: SAMPLE_JOB.url, title: SAMPLE_JOB.title, snippet: 'Software internship in Montréal', query: 'software intern' }] });
+    check('recherche : ajout Google sans candidature', searchResult.status === 200 && searchResult.data.added === 1 && (await api('GET', '/applications')).data.applications.length === 0);
+    const discoveryId = searchResult.data.jobs?.[0]?.id;
+    const savedDiscovery = await api('PATCH', `/search/jobs/${discoveryId}`, { status: 'saved' });
+    check('recherche : sauvegarder une offre ne soumet rien', savedDiscovery.status === 200 && savedDiscovery.data.jobs[0].status === 'saved');
+    const manual = await api('POST', '/search/import', { links: 'https://www.linkedin.com/jobs/view/1234567890', details: { title: 'Titre manuel', employerUrl: SAMPLE_JOB.url } });
+    check('recherche : liens LinkedIn/employeur réunis', manual.status === 200 && manual.data.jobs.length === 1 && manual.data.jobs[0].status === 'saved' && manual.data.jobs[0].sources.includes('linkedin-manual'));
+    const searchFile = path.join(DATA, 'search/discovery.json');
+    const validCatalog = fs.readFileSync(searchFile, 'utf8');
+    const badBatch = await api('POST', '/search/results', { items: [{ url: 'https://example.org/job/2' }, { url: 'http://127.0.0.1/private' }] });
+    check('recherche : lot invalide atomique', badBatch.status === 400 && fs.readFileSync(searchFile, 'utf8') === validCatalog);
+    fs.writeFileSync(searchFile, '{unreadable');
+    const brokenSearch = await api('POST', '/search/import', { links: SAMPLE_JOB.url });
+    check('recherche : catalogue corrompu conservé', brokenSearch.status === 409 && fs.readFileSync(searchFile, 'utf8') === '{unreadable');
+    fs.writeFileSync(searchFile, validCatalog);
+    check('recherche : aucun journal de candidature créé', !fs.existsSync(path.join(DATA, 'candidatures.csv')));
+
     console.log('Éditeur du profil (données fictives isolées)');
     const firstProfile = await api('GET', '/profile');
     check('schéma et révision fournis', firstProfile.data.fields?.some((f) => f.path === 'identity.address.line1') && /^[a-f0-9]{64}$/.test(firstProfile.data.revision));
@@ -256,6 +280,10 @@ Posting End Date 2026-10-14`,
     check('création', created.status === 200 && !!app?.id, `${app?.id} · CV recommandé : ${created.data.recommendation?.cvId}`);
     const again = await api('POST', '/applications', { job: SAMPLE_JOB });
     check('dédoublonnage par offre', again.data.existed === true && again.data.application.id === app.id);
+    const associatedSearch = await api('GET', '/search');
+    check('recherche : association à la candidature explicitement créée', associatedSearch.data.jobs[0].applicationId === app.id);
+    const removedSearch = await api('DELETE', `/search/jobs/${discoveryId}`);
+    check('recherche : supprimer une découverte conserve la candidature', removedSearch.status === 200 && removedSearch.data.jobs.length === 0 && (await api('GET', `/applications/${app.id}`)).status === 200);
 
     const put = await api('PUT', `/applications/${app.id}/letter`, {
       language: 'fr',

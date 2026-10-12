@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { getConfig } from '../server/src/config.js';
 import { findChrome, puppeteer } from '../server/src/pdf.js';
+import { testSearch } from './search-e2e.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'tests', 'output', 'e2e');
@@ -446,6 +447,8 @@ async function main() {
       const language = document.querySelector('#uiLanguage').getBoundingClientRect();
       return version.left >= 0 && version.right <= innerWidth && language.right <= innerWidth;
     }));
+    await testSearch({ browser, panel, site, sw, apiBase, out: OUT, check });
+
     // Server mismatch is shown, without changing the visible extension version.
     await panel.evaluate(() => {
       const original = globalThis.fetch;

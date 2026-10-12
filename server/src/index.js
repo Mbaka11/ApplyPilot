@@ -16,6 +16,7 @@ import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
 import { askJson, cancelAllPi, resolvePi } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
+import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery } from './search.js';
 import { detectRequirements, transcriptPath } from './requirements.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
 import { closeBrowser, findChrome, htmlToPdf } from './pdf.js';
@@ -288,6 +289,26 @@ route('GET', '/cvs/:id/pdf', ({ params, query, res }) => {
   sendFile(res, cv.pdfPath, { type: 'application/pdf', downloadName: cv.file });
   return undefined;
 });
+
+// Discovery is a separate catalog: none of these routes creates an application.
+function discoveryView() {
+  let profile = {};
+  try { profile = getProfile(); } catch { /* search can still use editable defaults */ }
+  return getSearch(profile, listApplications());
+}
+route('GET', '/search', () => discoveryView());
+route('PUT', '/search/settings', ({ body }) => {
+  saveSearchSettings(body, { availability: { termEn: discoveryView().settings.term } });
+  return discoveryView();
+});
+route('POST', '/search/results', ({ body }) => {
+  if (!Array.isArray(body?.items) || !body.items.length || body.items.length > 100) throw new HttpError(400, 'Ajoute entre 1 et 100 offres à la fois.');
+  const counts = addDiscoveries(body.items.map(item => ({ ...item, source: 'google', employerUrl: '' })));
+  return { ...discoveryView(), ...counts };
+});
+route('POST', '/search/import', ({ body }) => ({ ...importDiscoveries(body), ...discoveryView() }));
+route('PATCH', '/search/jobs/:id', ({ params, body }) => { updateDiscovery(params.id, body); return discoveryView(); });
+route('DELETE', '/search/jobs/:id', ({ params }) => { deleteDiscovery(params.id); return discoveryView(); });
 
 route('GET', '/applications', () => ({ applications: listApplications().map(summary), statuses: STATUSES }));
 

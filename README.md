@@ -1,11 +1,12 @@
 # ApplyPilot
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
 ![Chrome extension](https://img.shields.io/badge/Chrome-Manifest_V3-green)
 ![Interface](https://img.shields.io/badge/interface-English_%2F_Fran%C3%A7ais-purple)
 
 **Apply to internships faster, without typing the same information again.** ApplyPilot pairs a Chrome side panel with a small local Node.js server:
 
+- 🔍 **Internship discovery** — bounded Google searches, prepared LinkedIn links and manual imports, with editable filters and a local discovery catalog separate from applications.
 - 📄 **Tailored cover letters** — pi reads the posting and your CV source, drafts in the posting’s language and your style, and produces an editable, one-page PDF.
 - ✍️ **Form autofill** — Workday is the priority: contact details, addresses, phone numbers, experience, education, dates, eligibility questions, languages and websites. Generic forms, including Greenhouse- and Lever-style pages, are also supported.
 - 📎 **Attachments** — select an appropriate French, English or specialized CV; attach it, your cover letter and your configured transcript when relevant.
@@ -80,6 +81,22 @@ Leave **Overwrite existing fields** unchecked. **Do not press F5 on a form with 
 
 ## Usage
 
+### Find internships
+
+Open **Search**, review the internship keywords, AI/software/data/consulting domains, area and term, then choose **Search Google**. Default geography is **Greater Montréal + remote Canada**; the term comes from your availability and remains editable. Preview the exact queries before running them.
+
+- One dedicated, inactive tab per run; **1–8 queries**, at most **30 links per page**, no automatic result visits or pagination.
+- **Stop search** works from every panel tab. Keep the panel open while searching; closing it also stops the run. Completed catalog batches remain saved, and the search tab is left open for inspection.
+- LinkedIn is **assisted, not scraped**: open prepared searches yourself, then paste job links and optional details. An employer link can merge equivalent Google/LinkedIn discoveries.
+- Save, hide, restore, filter or delete catalog entries without creating applications. To apply, explicitly open the employer posting and use **Analyze this posting**.
+- Ranking is a simple keyword score, not an eligibility or vacancy check. Google can block collection or change its markup; there is no bypass and no exhaustive-results guarantee.
+
+Search does not invoke pi or send your CV/contact details to a model. Queries go to the selected website through your browser. See the [search workflow, limits, privacy and API contract](docs/search.md).
+
+<details><summary>Search preview (fictional, locally intercepted results)</summary><img src="docs/recherche.png" width="360" alt="ApplyPilot English search filters and independent discovery catalog with fictional internships"></details>
+
+### Prepare an application
+
 1. Open a posting and click **Analyze this posting**. The application remains active as you move through form steps. The recommended CV is preselected (★).
 2. **Generate cover letter**; allow roughly 20–60 seconds. Review the draft and warnings, edit it in the panel, then click **Update PDF**. You can choose French or English independently of the interface.
 3. Click **Apply / sign in**, then **Fill this page** on each step:
@@ -103,7 +120,7 @@ Changing tabs, navigating, or changing Workday steps cancels the previous run. L
 
 Choose **English** or **Français** below the header. On first use, a French browser defaults to French; other browser languages default to English. Your explicit choice is saved locally.
 
-Switching language changes system labels, dates, status displays, confirmations and feedback. It preserves unsaved profile fields, server URL edits, letter drafts and instructions. It does **not** translate or save your profile values, employer content, remembered answers, CVs or cover letters. Existing tracker status identifiers remain compatible.
+Switching language changes system labels, dates, status displays, confirmations and feedback. It preserves unsaved profile fields, server URL edits, letter drafts and instructions, search filters and manual-import drafts. It does **not** translate or save your profile values, employer content, remembered answers, CVs or cover letters. Existing tracker status identifiers remain compatible.
 
 ### Workday notes
 
@@ -138,13 +155,15 @@ Editing a profile does not update existing CV PDFs or cover letters. Keep study 
 - **Local-first storage:** the server binds to `127.0.0.1` and checks `Host` and `Origin` to reject website-originated API requests.
 - `profile.yaml`, `config.yaml`, `data/`, credentials and test outputs are excluded from Git.
 - **AI is not offline:** relevant posting, profile, CV and letter information is sent to the provider configured in pi to generate text. Its privacy policy and usage limits apply.
+- Search terms go to Google, or to LinkedIn when you explicitly open a prepared search. No LinkedIn content scripts, credential export or account automation are used. Normal browser navigation may use the current website session.
+- The discovery catalog lives in `data/search/discovery.json`, independently of applications; imported text stays local unless you explicitly use it in another workflow.
 - Passwords, CAPTCHA, signatures and consent controls are never completed automatically.
 - Unknown eligibility answers are not guessed. AI output is always marked for review.
 - ApplyPilot never submits applications. A tracker status alone is not proof of an employer submission.
 
 ## Limitations
 
-Sites vary. Unusual widgets can remain incomplete and need manual input. Workday is the priority, but fixtures cannot replace validation on a real employer form. Always review eligibility, attachments and generated text before submitting.
+Sites vary. Unusual widgets can remain incomplete and need manual input. Workday is the priority, but fixtures cannot replace validation on a real employer form. Always review eligibility, attachments and generated text before submitting. Discovery tests use locally intercepted Google/LinkedIn fixtures; live Google collection has not been established by these tests. LinkedIn pages are excluded from automatic extraction and autofill.
 
 ## Configuration reference
 
@@ -165,8 +184,8 @@ The extension header, this README badge, server package, content scripts and loc
 
 We use **Semantic Versioning**:
 
-- **Patch** (`0.4.0 → 0.4.1`): backward-compatible fixes or documentation-only releases.
-- **Minor** (`0.4.x → 0.5.0`): new backward-compatible features.
+- **Patch** (`0.5.0 → 0.5.1`): backward-compatible fixes or documentation-only releases.
+- **Minor** (`0.5.x → 0.6.0`): new backward-compatible features.
 - **Major** (`1.x → 2.0.0`): incompatible changes after a stable `1.0.0`; while on `0.x`, incompatible changes increment the minor version and are called out explicitly.
 
 Each published batch of changes gets a new version, not every intermediate file edit. Released tags are not moved or reused.
@@ -193,6 +212,9 @@ The bump command synchronizes release metadata and opens a changelog section. It
 | pi answers are taking too long | Click **Stop**; fill the next step or turn off AI |
 | Workday says City is required despite showing a value | Reload the extension, not Workday, and run autofill again |
 | Skills search is typed but nothing is selected | Update ApplyPilot and retry: only verified pills count as selected |
+| Search asks to restart the server | Restart it, reload ApplyPilot in `chrome://extensions`, then reopen the panel; do not reload Workday |
+| Google requires verification/consent or no readable results appear | Collection stops. Inspect the dedicated tab manually, change filters, or import links; no bypass or auto-resume |
+| LinkedIn is not automatically analyzed | Intentional: use Search for manual imports or open the employer posting |
 | No profile editor | Restart the server and reload the extension |
 | Workday asks you to sign in again | Check the Chrome profile and employer portal; the session may have expired |
 | Cannot write a PDF | Close the file in Acrobat or another PDF reader |
@@ -203,12 +225,13 @@ The bump command synchronizes release metadata and opens a changelog section. It
 
 ```sh
 cd server
-npm test                     # version, i18n, cancellation, server, content and extension tests
+npm test                     # version, i18n, cancellation, discovery, server, content and extension tests
+npm run test:search          # helpers, catalog, runner and locally intercepted Chrome parsing
 # Optional: real generation using your authenticated provider (uses quota):
 set APPLYPILOT_TEST_LLM=1 && npm run test:server   # Windows
 ```
 
-Default tests use fictional profiles, simulated employer forms and a fake pi CLI. They check English/French preferences and drafts, actual subprocess cancellation, late-answer rejection, focus, asynchronous selection, recreated controls, collapsed pills and reinjection without navigation. They never use real candidate data or contact an employer to submit anything.
+Default tests use fictional profiles, simulated employer forms and a fake pi CLI. They check English/French preferences and drafts, actual subprocess cancellation, late-answer rejection, focus, asynchronous selection, recreated controls, collapsed pills and reinjection without navigation. Discovery tests additionally cover aliases, manual precedence, catalog limits/corruption, challenge stops, redirects, tab ownership and independent application state. New discovery tabs are intercepted before navigation, with synthetic Google/LinkedIn pages served locally. Tests never use real candidate data or contact an employer to submit anything.
 
 ## Project layout
 
@@ -216,7 +239,8 @@ Default tests use fictional profiles, simulated employer forms and a fake pi CLI
 extension/          Chrome MV3 extension: side panel and content scripts
   content/          DOM, extraction, field inventory, widgets, matching, Workday, commands
   sidepanel/        UI, localization and navigation
-server/src/         Local server: configuration, CVs, pi, letters/PDFs, tracker and memory
+  search/           Query planning, safe Google collection, runner and catalog UI
+server/src/         Local server: configuration, CVs, pi, letters/PDFs, tracker, memory, discovery
 scripts/            Icons and release-version synchronization
 tests/              Server, content, end-to-end and cancellation fixtures
 config.example.yaml

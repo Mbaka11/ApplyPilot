@@ -74,7 +74,7 @@ body {
   color: var(--muted);
 }
 
-#headerStop {
+#headerStop, #headerSearchStop {
   margin-right: auto;
 }
 
@@ -129,6 +129,27 @@ body {
 .status.off::before {
   background: var(--bad);
 }
+
+/* Discovery stays readable in a narrow side panel; drafts are separate controls. */
+#tab-search fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+#tab-search label:not(.search-domains label) { display: block; margin: 9px 0 3px; font-size: 12px; }
+.search-domains { display: grid; gap: 4px; margin: 10px 0; }
+.search-domains label { display: flex; align-items: center; gap: 5px; }
+.search-domains input { width: auto; }
+.search-actions { margin-top: 10px; }
+.search-job h3 { margin-top: 8px; overflow-wrap: anywhere; }
+.search-url, .search-plan { overflow-wrap: anywhere; }
+.search-url { color: var(--accent); margin-top: 6px; }
+.search-plan { padding-left: 20px; }
+.search-plan li + li { margin-top: 8px; }
+.search-snippet { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.search-description { white-space: pre-wrap; max-height: 240px; overflow: auto; }
+.search-error { color: var(--bad); margin: 8px 0; }
+#searchProgress progress { width: 100%; margin: 6px 0; }
+#searchProgress:empty { display: none; }
+#searchState { width: auto; flex: 1; }
+#searchCount { font-size: 10px; }
+.language-bar { flex-wrap: wrap; }
 
 .tabs {
   display: flex;

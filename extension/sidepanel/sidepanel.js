@@ -1,6 +1,8 @@
 // ApplyPilot — panneau latéral : candidature active, lettre, remplissage, journal, profil.
 import { applicationUrl, existingApplicationTab } from './navigation.mjs';
 import { chooseLanguage, translate } from './i18n.mjs';
+import { createSearchPanel } from '../search/panel.mjs';
+import { isDiscoveryPage, isLinkedIn } from '../search/core.mjs';
 const CONTENT_FILES = [
   'i18n.js',
   'content/dom.js',
@@ -75,6 +77,15 @@ const tr = (source, values = {}) => translate(source, S.uiLanguage, values);
 const statusLabel = (status) => tr(STATUS_LABEL[status] || status);
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString(S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 
+const searchPanel = createSearchPanel({ element: $('#tab-search'), stopButton: $('#headerSearchStop'), api, tr, esc, fmtDate, toast,
+  canStart: () => !S.fillBusy,
+  activateApplication: async id => {
+    if (id === S.app?.id) return switchTab('app'); // resume without reloading its unsaved letter
+    if ((S.draftDirty || S.letterInstructions) && !confirm(tr('Changer de candidature et abandonner le brouillon de lettre non enregistré ?'))) return;
+    await setActiveApp(id); S.draftDirty = false; switchTab('app');
+  },
+});
+
 function renderShell() {
   document.documentElement.lang = S.uiLanguage;
   $('#appVersion').textContent = `v${VERSION}`;
@@ -82,7 +93,7 @@ function renderShell() {
   $('#uiLanguage').value = S.uiLanguage;
   $('#uiLanguageLabel').textContent = tr('Langue de l’interface');
   $('#serverStatus').title = `${tr('Revérifier la connexion au serveur')} · ${tr('Serveur')} v${S.health?.version || '—'}`;
-  for (const [tab, label] of [['app', 'Candidature'], ['journal', 'Journal'], ['profile', 'Profil']]) {
+  for (const [tab, label] of [['app', 'Candidature'], ['search', 'Recherche'], ['journal', 'Journal'], ['profile', 'Profil']]) {
     $(`[data-tab="${tab}"]`).textContent = tr(label);
   }
 }
@@ -99,6 +110,7 @@ async function setUiLanguage(language) {
   renderStatus();
   renderApp();
   renderJournal();
+  searchPanel.render();
   if (S.tab === 'profile') await renderProfile({ refresh: false });
   document.querySelectorAll('main details').forEach((el, i) => { if (i < details.length) el.open = details[i]; });
   $('#toast').className = 'toast';
@@ -165,12 +177,15 @@ async function activeTab() {
   return tab || null;
 }
 
-const scriptable = (url) => /^https?:\/\//.test(url || '') && !/^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/.test(url);
+const scriptable = (url) => /^https?:\/\//.test(url || '') && !isDiscoveryPage(url) && !/^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/.test(url);
 
 async function exec(tabId, cmd, payload, frameIds) {
   const res = await chrome.scripting.executeScript({
     target: frameIds ? { tabId, frameIds } : { tabId, allFrames: true },
-    func: (c, p) => (globalThis.__applyPilot ? globalThis.__applyPilot.run(c, p) : null),
+    func: (c, p) => {
+      if (/(^|\.)linkedin\.com\.?$|(^|\.)google\.(com|ca|fr|co\.uk)\.?$/.test(location.hostname)) return null;
+      return globalThis.__applyPilot ? globalThis.__applyPilot.run(c, p) : null;
+    },
     args: [cmd, payload],
   });
   return res.map((r) => (r.result && r.result.__ap ? { frameId: r.frameId, ...r.result } : null)).filter(Boolean);
@@ -179,9 +194,20 @@ async function exec(tabId, cmd, payload, frameIds) {
 async function runInTab(cmd, payload = {}, { tabId } = {}) {
   const tab = tabId == null ? await activeTab() : await chrome.tabs.get(tabId);
   if (!tab || !scriptable(tab.url)) throw new Error('Ouvre une offre ou un formulaire de candidature (page web).');
-  const pings = await exec(tab.id, 'ping', {});
-  if (!pings.length || pings.some((f) => f.version !== VERSION)) {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: CONTENT_FILES });
+  // Filter every frame, not only the top URL. Bind reinjection to the probed
+  // document so a navigation cannot turn a permitted frame into LinkedIn/Google.
+  const probes = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    func: async () => {
+      if (/(^|\.)linkedin\.com\.?$|(^|\.)google\.(com|ca|fr|co\.uk)\.?$/.test(location.hostname)) return null;
+      return { version: (await globalThis.__applyPilot?.run('ping', {}))?.version || '' };
+    },
+  });
+  const outdated = probes.filter(frame => frame.result && frame.result.version !== VERSION);
+  if (outdated.length) {
+    const documentIds = outdated.map(frame => frame.documentId);
+    if (documentIds.some(id => !id)) throw new Error('Impossible d’accéder à la page : ferme et rouvre le panneau, puis réessaie sans recharger ton formulaire.');
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, documentIds }, files: CONTENT_FILES });
   }
   const frames = await exec(tab.id, cmd, payload);
   if (!frames.length) throw new Error('Impossible d’accéder à la page : ferme et rouvre le panneau, puis réessaie sans recharger ton formulaire.');
@@ -200,7 +226,7 @@ async function refreshPage() {
   const tab = await activeTab();
   if (!tab || !scriptable(tab.url)) {
     S.page = null;
-    S.pageError = 'Ouvre une offre de stage ou un formulaire de candidature.';
+    S.pageError = isLinkedIn(tab?.url) ? 'LinkedIn reste manuel : utilise Recherche pour importer un lien ou ouvrir le site employeur.' : 'Ouvre une offre de stage ou un formulaire de candidature.';
     renderPage();
     return;
   }
@@ -225,7 +251,7 @@ async function refreshPage() {
       return !current || current.pageIdentity !== old.pageIdentity;
     }))) stopFill({ pageChanged: true });
     const match = S.apps.find((a) => a.jobKey && a.jobKey === S.page.jobKey);
-    if (match && match.id !== S.app?.id) await setActiveApp(match.id, { quiet: true });
+    if (match && match.id !== S.app?.id && !S.draftDirty && !S.letterInstructions) await setActiveApp(match.id, { quiet: true });
   } catch (e) {
     S.page = null;
     S.pageError = e.message;
@@ -378,6 +404,7 @@ async function execFill(run, cmd, payload) {
 
 async function fillPage() {
   if (S.fillRun) return;
+  if (searchPanel.running) return toast('Arrête la recherche avant de lancer le remplissage.', 'error');
   if (!S.health) return toast('Serveur non connecté : lance start.cmd', 'error');
   const run = { id: crypto.randomUUID(), controller: new AbortController(), tabId: null, pages: null };
   S.fillRun = run;
@@ -836,6 +863,7 @@ function switchTab(name) {
   if (name === 'journal') loadApps().then(renderJournal, () => renderJournal());
   if (name === 'profile') checkServer().then(renderProfile);
   if (name === 'app') renderApp();
+  if (name === 'search') searchPanel.show();
 }
 
 // ---------------------------------------------------------------------------
@@ -887,6 +915,7 @@ const ACTIONS = {
   submitted: () => markSubmitted(),
   exportCsv: () => chrome.tabs.create({ url: `${S.server}/journal.csv` }),
   saveServer: async () => {
+    searchPanel.reset();
     S.server = ($('#serverUrl').value || DEFAULT_SERVER).replace(/\/+$/, '');
     S.serverDraft = null;
     await chrome.storage.local.set({ serverUrl: S.server });
@@ -1004,6 +1033,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === 'ap:memorySaved' && msg.added) toast(tr('{count} réponse(s) mémorisée(s) pour les prochaines fois', { count: msg.added }));
 });
 window.addEventListener('pagehide', () => {
+  searchPanel.stop({ quiet: true });
   if (S.fillRun) {
     const run = S.fillRun;
     run.controller.abort();
