@@ -43,7 +43,7 @@ export function buildSearchPlan(settings) {
   const options = validateSettings(settings), plan = [];
   // Local/remote pairs: a smaller budget doesn't silently remove all remote queries.
   for (const category of options.categories) for (const location of SCOPES[options.scope].google) {
-    const query = [keywordQuery(options.keywords), CATEGORIES[category].query, location, termQuery(options.term), '-site:linkedin.com/in/ -site:linkedin.com/pub/'].filter(Boolean).join(' ');
+    const query = [keywordQuery(options.keywords), CATEGORIES[category].query, location, termQuery(options.term), '(site:myworkdayjobs.com OR site:jobs.lever.co OR site:job-boards.greenhouse.io OR inurl:viewjob OR inurl:job-listing OR inurl:job)', '-site:linkedin.com/in/ -site:linkedin.com/pub/'].filter(Boolean).join(' ');
     const url = new URL('https://www.google.com/search');
     url.search = new URLSearchParams({ q: query, hl: 'en', gl: 'ca', num: '10' }).toString();
     plan.push({ category, query, url: url.href });
@@ -56,6 +56,20 @@ export function linkedinSearchUrl(settings, remote = false) {
   const url = new URL('https://www.linkedin.com/jobs/search/');
   url.search = new URLSearchParams({ keywords: query, location: remote ? 'Canada' : SCOPES[options.scope].linkedin, f_E: '1', ...(remote ? { f_WT: '2' } : {}) }).toString();
   return url.href; // User opens this link. No LinkedIn collector or API replay exists.
+}
+// Public, undocumented LinkedIn HTML endpoint. Never accepts a caller-supplied host.
+export function buildLinkedInPlan(settings) {
+  const options = validateSettings(settings), plan = [];
+  const places = options.scope === 'montreal_remote'
+    ? [{ location: 'Montreal, Quebec, Canada' }, { location: 'Canada', remote: true }]
+    : [{ location: SCOPES[options.scope].linkedin }];
+  for (const category of options.categories) for (const place of places) {
+    const query = [keywordQuery(options.keywords), CATEGORIES[category].query, termQuery(options.term)].filter(Boolean).join(' ');
+    const url = new URL('https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search');
+    url.search = new URLSearchParams({ keywords: query, location: place.location, f_E: '1', start: '0', ...(place.remote ? { f_WT: '2' } : {}) }).toString();
+    plan.push({ category, query, location: place.location, remote: !!place.remote, url: url.href });
+  }
+  return plan.slice(0, options.maxPages);
 }
 export function isGoogleSearch(url) {
   try { const u = new URL(url); return u.protocol === 'https:' && !u.username && !u.password && !u.port && /^(?:www\.)?google\.(?:com|ca|fr|co\.uk)$/.test(u.hostname) && u.pathname === '/search'; } catch { return false; }

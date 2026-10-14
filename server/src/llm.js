@@ -39,6 +39,39 @@ export function resolvePi(cfg) {
   return { file: 'pi', args: [], env: {}, shell: process.platform === 'win32', desc: 'pi (PATH)' };
 }
 
+const THINKING = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+const identifier = value => typeof value === 'string' && value.trim() && value.length <= 512 && !/[\u0000-\u001f\u007f]/.test(value) ? value.trim() : null;
+
+/** Read only two non-secret defaults. Never load auth.json, provider headers or tools. */
+function selection(cfg, { model, thinking } = {}) {
+  const configured = model ?? cfg.llm?.model;
+  if (configured && !identifier(configured)) throw Object.assign(new Error('Sélection de modèle pi invalide.'), { status: 500 });
+  let requestedModel = identifier(configured), modelSource = 'applypilot';
+  if (!requestedModel) {
+    modelSource = 'pi-auto';
+    try {
+      const dir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
+      const defaults = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+      const provider = identifier(defaults.defaultProvider), id = identifier(defaults.defaultModel);
+      if (id) { requestedModel = provider ? `${provider}/${id}` : id; modelSource = 'pi-default'; }
+    } catch { /* A missing/unreadable default is not observed generation metadata. */ }
+  }
+  const requestedThinking = THINKING.has(thinking) ? thinking : null;
+  return { requestedModel, modelSource, requestedThinking };
+}
+export function generationSettings(cfg) {
+  return { letter: selection(cfg, { thinking: cfg.llm?.letterThinking }), answers: selection(cfg, { thinking: cfg.llm?.answersThinking }) };
+}
+
+/** Retain only final text and public attribution, never reasoning blocks or signatures. */
+function assistantResult(event) {
+  const message = event?.type === 'message_end' ? event.message : event?.type === 'agent_end' ? [...(event.messages || [])].reverse().find(m => m.role === 'assistant') : null;
+  if (message?.role !== 'assistant') return null;
+  if (['error', 'aborted'].includes(message.stopReason)) throw Object.assign(new Error('Pi a interrompu la génération.'), { status: 502 });
+  const text = (Array.isArray(message.content) ? message.content : []).filter(block => block.type === 'text' && typeof block.text === 'string').map(block => block.text).join('');
+  return { text, provider: identifier(message.provider), model: identifier(message.model) };
+}
+
 const activeRuns = new Set();
 const cancelledError = () => Object.assign(new Error('Remplissage arrêté'), { name: 'AbortError', status: 499 });
 export function cancelAllPi() {
@@ -55,16 +88,14 @@ function killTree(child) {
   }
 }
 
-/**
- * Lance `pi --print` (sans outils, sans session, sans extensions) avec le prompt sur stdin.
- * Retourne le texte final de l'assistant.
- */
+/** One-shot, tool-free JSON events; only assistant text and attribution survive. */
 export function runPi(prompt, { cfg, thinking, model, timeoutSeconds, signal } = {}) {
   if (signal?.aborted) return Promise.reject(cancelledError());
+  if (thinking && !THINKING.has(thinking)) return Promise.reject(Object.assign(new Error('Niveau d’effort pi invalide.'), { status: 500 }));
   const runner = resolvePi(cfg);
   const args = [
     ...runner.args,
-    '--print',
+    '--print', '--mode', 'json',
     '--no-tools',
     '--no-session',
     '--no-extensions',
@@ -73,9 +104,10 @@ export function runPi(prompt, { cfg, thinking, model, timeoutSeconds, signal } =
     '--no-context-files',
     '--no-themes',
   ];
-  const m = model ?? cfg.llm?.model;
-  if (m) args.push('--model', m);
-  if (thinking) args.push('--thinking', thinking);
+  const requested = selection(cfg, { model, thinking });
+  // Freeze the displayed default for this call; later defaults do not rewrite history.
+  if (requested.requestedModel) args.push('--model', requested.requestedModel);
+  if (requested.requestedThinking) args.push('--thinking', requested.requestedThinking);
   args.push('Suis les instructions ci-dessus et réponds uniquement avec le JSON demandé.');
 
   const env = { ...process.env, ...runner.env, PI_SKIP_VERSION_CHECK: '1' };
@@ -87,7 +119,7 @@ export function runPi(prompt, { cfg, thinking, model, timeoutSeconds, signal } =
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const child = spawn(runner.file, args, { cwd, env, shell: runner.shell, windowsHide: true, detached: process.platform !== 'win32' });
-    let out = '';
+    let pending = '', result = null, outputBytes = 0;
     let err = '';
     let done = false;
     const cleanup = () => {
@@ -115,8 +147,26 @@ export function runPi(prompt, { cfg, thinking, model, timeoutSeconds, signal } =
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', (d) => (err += d));
+    const consume = line => {
+      if (!line.trim()) return;
+      const event = JSON.parse(line);
+      const next = assistantResult(event);
+      if (next) result = next;
+    };
+    child.stdout.on('data', chunk => {
+      if (done) return;
+      try {
+        outputBytes += Buffer.byteLength(chunk);
+        if (outputBytes > 32 * 1024 * 1024 || pending.length + chunk.length > 4 * 1024 * 1024) throw new Error('Flux pi trop volumineux.');
+        pending += chunk;
+        let end;
+        while ((end = pending.indexOf('\n')) >= 0) { consume(pending.slice(0, end)); pending = pending.slice(end + 1); }
+      } catch {
+        done = true; cleanup(); killTree(child);
+        reject(Object.assign(new Error('Flux JSON de pi invalide ou interrompu.'), { status: 502 }));
+      }
+    });
+    child.stderr.on('data', chunk => { err = (err + chunk).slice(-8000); });
     child.on('error', (e) => {
       if (done) return;
       done = true;
@@ -129,11 +179,16 @@ export function runPi(prompt, { cfg, thinking, model, timeoutSeconds, signal } =
       cleanup();
       const ms = Date.now() - started;
       if (code !== 0) {
-        const tail = (err || out).trim().split('\n').slice(-8).join('\n');
+        const tail = err.trim().split('\n').slice(-8).join('\n');
         reject(Object.assign(new Error(`pi a échoué (code ${code}) : ${tail || 'aucun détail'}`), { status: 502 }));
         return;
       }
-      resolve({ text: out.trim(), ms, runner: runner.desc });
+      try {
+        consume(pending);
+        if (!result?.text) throw new Error();
+        resolve({ text: result.text.trim(), ms, runner: runner.desc, generation: { schema: 1, ...requested, provider: result.provider, model: result.model,
+          observedThinking: null, attribution: result.model ? 'pi-assistant-message' : 'unknown', attempts: 1 } });
+      } catch { reject(Object.assign(new Error('Pi n’a pas renvoyé de réponse finale exploitable.'), { status: 502 })); }
     });
     child.stdin.on('error', () => {});
     child.stdin.end(prompt, 'utf8');
@@ -165,12 +220,12 @@ export function extractJson(text) {
 export async function askJson(prompt, opts) {
   const first = await runPi(prompt, opts);
   try {
-    return { data: extractJson(first.text), ms: first.ms, runner: first.runner };
+    return { data: extractJson(first.text), ms: first.ms, runner: first.runner, generation: first.generation };
   } catch {
     const retry = await runPi(
       `${prompt}\n\nIMPORTANT : ta réponse précédente n'était pas un JSON valide. Réponds UNIQUEMENT avec l'objet JSON, sans aucun texte autour.`,
       opts,
     );
-    return { data: extractJson(retry.text), ms: first.ms + retry.ms, runner: retry.runner };
+    return { data: extractJson(retry.text), ms: first.ms + retry.ms, runner: retry.runner, generation: { ...retry.generation, attempts: 2 } };
   }
 }

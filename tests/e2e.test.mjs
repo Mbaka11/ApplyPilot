@@ -32,6 +32,13 @@ async function replaceText(page, selector, text) {
   await page.type(selector, text);
 }
 
+async function resumeFromHome(panel, id) {
+  const selector = `#tab-home [data-activate="${id}"]`;
+  await panel.waitForSelector(selector);
+  await panel.click(selector);
+  await panel.waitForSelector('#cvSelect', { visible: true });
+}
+
 function prepareData() {
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(path.join(OUT, 'cvs'), { recursive: true });
@@ -39,7 +46,7 @@ function prepareData() {
   fs.writeFileSync(path.join(OUT, 'cvs', 'Marie_Tremblay_CV_FR.pdf'), '%PDF-1.4\n%test\n%%EOF\n');
   fs.writeFileSync(
     path.join(OUT, 'config.yaml'),
-    `cvDir: ${JSON.stringify(path.join(OUT, 'cvs').replace(/\\/g, '/'))}\nstyleDir: ${JSON.stringify(path.join(OUT, 'style').replace(/\\/g, '/'))}\nllm:\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`,
+    `cvDir: ${JSON.stringify(path.join(OUT, 'cvs').replace(/\\/g, '/'))}\nstyleDir: ${JSON.stringify(path.join(OUT, 'style').replace(/\\/g, '/'))}\nllm:\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`,
   );
   fs.writeFileSync(
     path.join(OUT, 'profile.yaml'),
@@ -86,8 +93,9 @@ async function startApi() {
     APPLYPILOT_CONFIG: path.join(OUT, 'config.yaml'),
     APPLYPILOT_PROFILE: path.join(OUT, 'profile.yaml'),
     APPLYPILOT_FAKE_PI_DIR: path.join(OUT, 'fake-pi'),
+    APPLYPILOT_LINKEDIN_FIXTURE: '1',
   };
-  const srv = spawn(process.execPath, ['server/src/index.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn(process.execPath, ['--import', './tests/fixtures/mock-linkedin.mjs', 'server/src/index.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   srv.stdout.on('data', (d) => (logs += d));
   srv.stderr.on('data', (d) => (logs += d));
@@ -142,9 +150,9 @@ async function main() {
     check('panneau connecté au serveur', true, await panel.$eval('#serverStatus', (e) => e.textContent));
     check('extension version visible beside ApplyPilot', (await panel.$eval('#appVersion', (e) => e.textContent)) === `v${VERSION}`);
     check('stored French interface preference is respected', (await panel.$eval('html', (e) => e.lang)) === 'fr');
-    await panel.waitForSelector('[data-action="analyze"]', { timeout: 10000 });
+    await panel.waitForSelector('#tab-home [data-action="analyze"]', { timeout: 10000 });
     check('offre détectée dans la page', (await panel.$eval('#pageCard', (e) => e.textContent)).includes('Stagiaire en apprentissage automatique'));
-    await panel.click('[data-action="analyze"]');
+    await panel.click('#tab-home [data-action="analyze"]');
     await panel.waitForFunction(() => document.querySelector('#appCard h3')?.textContent.includes('Stagiaire'), { timeout: 10000 });
     const appText = await panel.$eval('#appCard', (e) => e.textContent);
     check('candidature créée et active', appText.includes('Nordique Analytique'), appText.replace(/\s+/g, ' ').slice(0, 90));
@@ -154,11 +162,17 @@ async function main() {
     check('exigences de l’offre affichées (bilinguisme)', /À prévoir/.test(reqs) && /bilinguisme/i.test(reqs), reqs.replace(/\s+/g, ' ').slice(0, 120));
     check('section lettre affichée', (await panel.$eval('#letterCard', (e) => e.textContent)).includes('Générer la lettre'));
 
-    // Une installation fraîche reprend la seule candidature en cours, sans en créer une autre.
+    // An old active ID and the sole ongoing application no longer force resumption.
+    await panel.reload();
+    await panel.waitForFunction(() => document.querySelector('#serverStatus')?.classList.contains('on') && !!document.querySelector('#tab-home [data-activate]'));
+    check('home opens without restoring the saved active application', (await panel.$eval('.tab.active', e => e.id)) === 'tab-home' && !(await panel.$('#appCard h3')));
     await sw.evaluate(() => chrome.storage.local.remove('activeAppId'));
     await panel.reload();
+    await panel.waitForSelector('#tab-home [data-activate]');
+    check('even a sole ongoing or page-matched application requires explicit resumption', !(await panel.$('#appCard h3')));
+    await panel.click('#tab-home [data-activate]');
     await panel.waitForFunction(() => document.querySelector('#appCard h3')?.textContent.includes('Stagiaire'), { timeout: 10000 });
-    check('candidature en cours reprise sur une installation fraîche', true);
+    check('explicit home resumption opens the application', (await panel.$eval('.tab.active', e => e.id)) === 'tab-app');
     const tabsBefore = await sw.evaluate(() => chrome.tabs.query({}).then((tabs) => tabs.length));
     await site.evaluate(() => { window.unsavedTrial = 'conserver'; });
     await panel.click('[data-action="applyJob"]');
@@ -213,6 +227,10 @@ async function main() {
     await panel.screenshot({ path: path.join(OUT, 'panel-profile-editor.png'), fullPage: true });
     await panel.click('[data-tab="app"]');
 
+    // Explicitly resume after the panel-only reloads above; never reload the form.
+    const resumeId = await panel.$eval('#pickApp', e => e.options[1].value);
+    await panel.select('#pickApp', resumeId);
+    await panel.waitForSelector('#cvSelect');
     // Formulaire Workday sur la même offre → la candidature reste active.
     await site.goto(`${FIX_URL}/workday-myinfo.html`);
     await sleep(1500);
@@ -341,6 +359,7 @@ async function main() {
       body: JSON.stringify({ subject: 'Candidature test', body, language: 'fr' }),
     });
     await panel.reload();
+    await resumeFromHome(panel, appId);
     await panel.waitForSelector('#letterBody', { timeout: 10000 });
     check('éditeur de lettre affiché', (await panel.$eval('#letterBody', (e) => e.value)).startsWith('Madame'));
     const letterBeforeSwitch = (await fetch(`${apiBase}/applications/${appId}`).then((r) => r.json())).application.letter;
@@ -413,8 +432,9 @@ async function main() {
     });
     await panel.select('#uiLanguage', 'en');
     await site.goto(`${FIX_URL}/posting-en.html`);
-    await panel.waitForFunction(() => document.querySelector('[data-action="analyze"]')?.textContent === 'Analyze this posting', { timeout: 10000 });
-    await panel.click('[data-action="analyze"]');
+    await panel.waitForFunction(() => document.querySelector('#pageCard [data-action="analyze"]')?.textContent === 'Analyze this posting', { timeout: 10000 });
+    panel.once('dialog', dialog => dialog.accept());
+    await panel.click('#pageCard [data-action="analyze"]');
     await panel.waitForFunction(() => document.querySelector('#appCard h3')?.textContent.includes('Machine Learning'), { timeout: 10000 });
     check('English posting recommends English CV independently of the interface', (await panel.$eval('#cvSelect', (e) => e.value)).endsWith('_EN'));
     const englishApp = (await fetch(`${apiBase}/applications`).then((r) => r.json())).applications.find((a) => a.company === 'Nordic Analytics');
@@ -425,6 +445,7 @@ async function main() {
     });
     await panel.select('#letterLang', 'auto');
     await panel.reload();
+    await resumeFromHome(panel, englishApp.id);
     await panel.waitForSelector('#letterBody');
     check('English screenshots use fictional English content, not candidate applications', (await panel.$eval('#letterBody', (e) => e.value)).startsWith('Dear Hiring Team') && (await panel.$eval('#appCard', (e) => e.textContent)).includes('Nordic Analytics'));
     await site.goto(`${FIX_URL}/workday-myinfo-en.html`);
@@ -434,7 +455,11 @@ async function main() {
     check('English feedback uses localized review and filled labels', /filled/.test(await panel.$eval('#fillCard .summary', (e) => e.textContent)));
     await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
     await panel.screenshot({ path: path.join(OUT, 'panel-en.png'), fullPage: true });
+    // Foreground each fixture before capture: background compositing can stall
+    // Page.captureScreenshot in headless Chrome on Windows.
+    await site.bringToFront();
     await site.screenshot({ path: path.join(OUT, 'workday-en.png'), fullPage: true });
+    await panel.bringToFront();
     await panel.click('[data-tab="profile"]');
     await panel.waitForFunction(() => document.querySelector('[data-profile-path="identity.address.line1"]')?.value === '456 Example Street');
     await panel.evaluate(() => window.scrollTo(0, 0));
@@ -448,6 +473,37 @@ async function main() {
       return version.left >= 0 && version.right <= innerWidth && language.right <= innerWidth;
     }));
     await testSearch({ browser, panel, site, sw, apiBase, out: OUT, check });
+
+    // Model attribution uses the fake pi event stream, never provider quota.
+    check('letter UI distinguishes legacy attribution from settings for the next generation', (await panel.$eval('#letterCard', e => e.textContent)).includes('Legacy letter') && (await panel.$eval('#letterCard', e => e.textContent)).includes('fixture/requested'));
+    const beforeGeneration = await panel.$eval('#letterSubject', e => e.value);
+    panel.once('dialog', dialog => dialog.dismiss());
+    await panel.click('[data-action="generate"]');
+    check('regeneration can be cancelled without discarding an unsaved draft', (await panel.$eval('#letterSubject', e => e.value)) === beforeGeneration && !(await panel.$('#letterCard .busy')));
+    await panel.$eval('#letterCard details', e => { e.open = true; });
+    await replaceText(panel, '#letterInstructions', 'SYNTHETIC_INSTRUCTION_CANARY');
+    panel.once('dialog', dialog => dialog.accept());
+    await panel.click('[data-action="generate"]');
+    await panel.waitForSelector('#letterCard .busy');
+    check('requested model and effort remain visible while generation runs', (await panel.$eval('#letterCard', e => e.textContent)).includes('fixture/requested') && (await panel.$eval('#letterCard', e => e.textContent)).includes('medium'));
+    await panel.waitForFunction(() => document.querySelector('#letterBody')?.value.includes('I would like to contribute'), { timeout: 30000 });
+    const generated = (await fetch(`${apiBase}/applications/${englishApp.id}`).then(r => r.json())).application.letter;
+    check('observed model and requested effort are retained with the generated letter', generated.generation.model === 'demo-observed' && generated.generation.requestedThinking === 'medium' && generated.generation.observedThinking === null);
+    check('user instructions are sent before the busy view removes the input', generated.instructions === 'SYNTHETIC_INSTRUCTION_CANARY' && fs.readdirSync(path.join(OUT, 'fake-pi')).some(name => JSON.parse(fs.readFileSync(path.join(OUT, 'fake-pi', name), 'utf8')).instructionsSeen));
+    check('private reasoning blocks do not enter saved application data or the UI', !JSON.stringify(generated).includes('PRIVATE_REASONING_CANARY') && !(await panel.$eval('#letterCard', e => e.textContent)).includes('PRIVATE_REASONING_CANARY'));
+    await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
+    await panel.screenshot({ path: path.join(OUT, 'letter-provenance-en.png'), fullPage: true });
+    await replaceText(panel, '#letterBody', generated.body + '\n\nEdited synthetic draft.');
+    await panel.click('[data-action="saveLetter"]');
+    await panel.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('PDF updated'), { timeout: 30000 });
+    const edited = (await fetch(`${apiBase}/applications/${englishApp.id}`).then(r => r.json())).application.letter;
+    check('manual PDF edits retain attribution and are marked as subsequent edits', edited.editedAfterGeneration && JSON.stringify(edited.generation) === JSON.stringify(generated.generation));
+    const beforeLeave = JSON.stringify((await fetch(`${apiBase}/applications`).then(r => r.json())).applications);
+    await panel.click('[data-action="newApp"]');
+    await panel.waitForFunction(() => document.querySelector('.tab.active')?.id === 'tab-home');
+    check('leaving an application returns home without deleting or marking it submitted', !(await panel.$('#appCard h3')) && JSON.stringify((await fetch(`${apiBase}/applications`).then(r => r.json())).applications) === beforeLeave);
+    await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
+    await panel.screenshot({ path: path.join(OUT, 'home-prototype-en.png'), fullPage: true });
 
     // Server mismatch is shown, without changing the visible extension version.
     await panel.evaluate(() => {

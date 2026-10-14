@@ -13,10 +13,11 @@ import {
   profileWarnings,
 } from './config.js';
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
-import { askJson, cancelAllPi, resolvePi } from './llm.js';
+import { askJson, cancelAllPi, resolvePi, generationSettings } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
 import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery } from './search.js';
+import { searchLinkedInPage } from './linkedin.js';
 import { detectRequirements, transcriptPath } from './requirements.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
 import { closeBrowser, findChrome, htmlToPdf } from './pdf.js';
@@ -258,11 +259,14 @@ route('GET', '/health', () => {
     cvCount: cvs.length,
     cvError: cvError || null,
     pi: resolvePi(cfg).desc,
+    generation: generationSettings(cfg),
     chrome: findChrome(cfg),
     fill: cfg.fill,
     documents: { transcript: !!(profile && transcriptPath(profile)) },
   };
 });
+
+route('GET', '/generation', () => generationSettings(getConfig()));
 
 /** Relevé de notes configuré dans le profil (documents.transcript) : joint aux champs « relevé ». */
 route('GET', '/documents/transcript', ({ query, res }) => {
@@ -307,6 +311,17 @@ route('POST', '/search/results', ({ body }) => {
   return { ...discoveryView(), ...counts };
 });
 route('POST', '/search/import', ({ body }) => ({ ...importDiscoveries(body), ...discoveryView() }));
+route('POST', '/search/linkedin', async ({ body, res }) => {
+  const controller = new AbortController();
+  const disconnect = () => controller.abort();
+  res.once('close', disconnect);
+  try {
+    const result = await searchLinkedInPage({ settings: body?.settings, index: body?.index, acknowledgeExperimental: body?.acknowledgeExperimental === true, signal: controller.signal });
+    if (controller.signal.aborted || res.destroyed) return undefined;
+    const counts = result.items.length ? addDiscoveries(result.items) : { added: 0, updated: 0, merged: 0 };
+    return { ...discoveryView(), ...counts, received: result.items.length, evidence: result.evidence, truncated: result.truncated };
+  } finally { res.removeListener('close', disconnect); }
+});
 route('PATCH', '/search/jobs/:id', ({ params, body }) => { updateDiscovery(params.id, body); return discoveryView(); });
 route('DELETE', '/search/jobs/:id', ({ params }) => { deleteDiscovery(params.id); return discoveryView(); });
 
@@ -370,7 +385,7 @@ route('POST', '/applications/:id/letter', async ({ params, body }) => {
     instructions: String(body.instructions || '').slice(0, 2000),
     cfg,
   });
-  const { data, ms, runner } = await askJson(prompt, { cfg, thinking: cfg.llm.letterThinking });
+  const { data, ms, runner, generation } = await askJson(prompt, { cfg, thinking: cfg.llm.letterThinking });
   if (!data || typeof data.body !== 'string' || data.body.trim().length < 200) {
     throw new HttpError(502, 'pi a renvoyé une lettre vide ou incomplète, réessaie');
   }
@@ -386,18 +401,26 @@ route('POST', '/applications/:id/letter', async ({ params, body }) => {
     highlights: cleanList(data.highlights),
     warnings: cleanList(data.warnings),
     cvId,
-    instructions: body.instructions || '',
+    instructions: String(body.instructions || '').slice(0, 2000),
     generatedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     generationMs: ms,
     generator: runner,
+    generation,
+    editedAfterGeneration: false,
   };
   if (!app.job.company && letter.company) app.job.company = letter.company;
   if (!app.job.title && letter.jobTitle) app.job.title = letter.jobTitle;
-  app.cvId = cvId;
+  const originalCvId = app.cvId;
   await renderLetterFiles(app, letter, profile, cfg);
-  saveApplication(app);
-  return { application: appForClient(app), letter: app.letter };
+  // Keep status/notes changes made while the provider or PDF renderer was busy.
+  const latest = getApplication(app.id);
+  latest.letter = app.letter;
+  if (!latest.job.company && letter.company) latest.job.company = letter.company;
+  if (!latest.job.title && letter.jobTitle) latest.job.title = letter.jobTitle;
+  if (latest.cvId === originalCvId) latest.cvId = cvId;
+  saveApplication(latest);
+  return { application: appForClient(latest), letter: latest.letter };
 });
 
 route('PUT', '/applications/:id/letter', async ({ params, body }) => {
@@ -414,11 +437,15 @@ route('PUT', '/applications/:id/letter', async ({ params, body }) => {
     body: text.trim(),
     recipient: typeof body.recipient === 'string' ? body.recipient.trim() : prev.recipient || '',
     company: typeof body.company === 'string' ? body.company.trim() : prev.company || app.job.company,
+    editedAfterGeneration: !!prev.editedAfterGeneration,
     updatedAt: new Date().toISOString(),
   };
+  if (prev.generation && ['language', 'subject', 'body', 'recipient', 'company'].some(key => letter[key] !== prev[key])) letter.editedAfterGeneration = true;
   await renderLetterFiles(app, letter, profile, cfg);
-  saveApplication(app);
-  return { application: appForClient(app), letter: app.letter };
+  const latest = getApplication(app.id);
+  latest.letter = app.letter;
+  saveApplication(latest);
+  return { application: appForClient(latest), letter: latest.letter };
 });
 
 route('GET', '/applications/:id/letter.pdf', ({ params, query, res }) => {

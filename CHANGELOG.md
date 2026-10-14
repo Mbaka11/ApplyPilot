@@ -2,6 +2,33 @@
 
 All published changes are tracked here. ApplyPilot uses Semantic Versioning; `0.x` is still pre-stable. Release tags are immutable.
 
+## [0.6.0]
+
+### Added
+- Neutral Home dashboard with current-page actions, tracking counts and explicit application resumption.
+- Job/listing/unknown URL classification, job-only default view, local platform badges and separate platform/discovery-method filters.
+- Experimental anonymous LinkedIn guest-HTML connector, fixed destination, inert parsing, bounded requests/body/card counts, cancellation, cooldown and no redirects/retries or account access.
+- Letter model/effort preview, reported model provenance from pi JSON events, preserved generation metadata and explicit unknown attribution for legacy letters/effective reasoning levels.
+- Schema-2 catalog support with an exact private schema-1 backup on first mutation; reads do not migrate.
+- Synthetic HTTP/parser/UI/provenance regressions and English screenshots using fictional data.
+
+### Changed
+- Google queries favor individual posting/ATS paths; known listing pages are skipped while existing catalog entries are retained in separate views.
+- Startup, reconnection and page detection no longer automatically restore the last or sole ongoing application.
+- Application switching and regeneration protect unsaved drafts; leaving a record never marks it submitted.
+- Pi output processing discards reasoning blocks and signatures rather than storing a raw event stream.
+
+### Fixed
+- Letter instructions are captured before the generation spinner removes the input.
+- Generation/manual PDF rendering preserve tracker status and notes edited concurrently.
+- Manual PDF edits retain generation attribution, and further edits during a save remain dirty.
+- Browser-fixture screenshots bring the target page to the foreground to avoid a background capture stall on Windows.
+
+### Verification and limitations
+- An initial public LinkedIn probe returned HTTP 200 and ten individual links; subsequent connector validation received HTTP 429 and stopped. No bypass or retry followed.
+- Structured extraction, UI and cancellation/cooldown tests use local fixtures. Live Google relevance and reliable live LinkedIn collection remain unverified.
+- LinkedIn remains explicitly experimental. Publishing this version does not establish reliable live access or official API support.
+
 ## [0.5.0]
 
 ### Added

@@ -134,6 +134,15 @@ body {
 #tab-search fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 #tab-search label:not(.search-domains label) { display: block; margin: 9px 0 3px; font-size: 12px; }
 .search-domains { display: grid; gap: 4px; margin: 10px 0; }
+.search-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.search-filter-grid > div { min-width: 0; }
+.platform-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.platform-icon { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; }
+.platform-linkedin .platform-icon { background: #0a66c2; color: white; }
+.platform-indeed .platform-icon { background: #003a9b; color: white; }
+.search-provenance { margin: 5px 0 2px; }
+#searchSettingsDetails, #searchPlanDetails { margin: 10px 0; }
+#tab-search summary { cursor: pointer; font-weight: 600; }
 .search-domains label { display: flex; align-items: center; gap: 5px; }
 .search-domains input { width: auto; }
 .search-actions { margin-top: 10px; }
@@ -169,6 +178,19 @@ body {
   color: var(--muted);
   border-bottom: 2px solid transparent;
   cursor: pointer;
+}
+
+.home-hero { background: linear-gradient(135deg, #fff, var(--accent-soft)); }
+.home-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.home-metrics button { font: inherit; color: var(--text); cursor: pointer; padding: 10px 6px; }
+.home-metrics b { display: block; font-size: 24px; color: var(--accent); }
+.home-metrics span { font-size: 11px; }
+#tab-home h3 { overflow-wrap: anywhere; }
+.generation-info { padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--bg); overflow-wrap: anywhere; margin: 6px 0; }
+.generation-info .muted { margin-top: 4px; font-size: 11px; }
+@media (max-width: 380px) {
+  .tabs { gap: 0; padding-inline: 5px; }
+  .tabs button { font-size: 11px; padding-inline: 2px; min-width: 0; }
 }
 
 .tabs button.active {

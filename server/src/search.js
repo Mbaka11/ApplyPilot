@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DATA_DIR } from './config.js';
-import { writeJson } from './util.js';
+import { writeJson, ensureDir } from './util.js';
+import { catalogMeta } from '../../extension/search/catalog.mjs';
 import { searchDefaults, validateSettings, externalJobUrl, offerKey, rankOffer, JOB_STATES, isLinkedIn, manualLinks } from '../../extension/search/core.mjs';
 
 const file = () => path.join(DATA_DIR, 'search', 'discovery.json');
@@ -11,7 +12,7 @@ const fail = (status, message) => { throw Object.assign(new Error(message), { st
 const now = () => new Date().toISOString();
 const LIMIT = 3000, MAX_BYTES = 32 * 1024 * 1024;
 const FIELDS = { title: 300, company: 200, location: 200, snippet: 4000, description: 20000 };
-const SOURCES = ['google', 'manual', 'linkedin-manual'];
+const SOURCES = ['google', 'manual', 'linkedin-manual', 'linkedin-public'];
 const union = (...lists) => [...new Set(lists.flat())];
 const validId = id => typeof id === 'string' && /^[a-f0-9]{16}$/.test(id);
 function text(value, max) {
@@ -20,12 +21,12 @@ function text(value, max) {
   return value.trim().replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
 }
 function read() {
-  if (!fs.existsSync(file())) return { schema: 1, settings: null, jobs: [] };
+  if (!fs.existsSync(file())) return { schema: 2, settings: null, jobs: [] };
   let state;
   try {
     if (fs.statSync(file()).size > MAX_BYTES) throw new Error();
     state = JSON.parse(fs.readFileSync(file(), 'utf8'));
-    if (!state || state.schema !== 1 || !Array.isArray(state.jobs) || state.jobs.length > LIMIT) throw new Error();
+    if (!state || ![1, 2].includes(state.schema) || !Array.isArray(state.jobs) || state.jobs.length > LIMIT) throw new Error();
     if (state.settings !== null) validateSettings(state.settings);
     const ids = new Set();
     for (const job of state.jobs) {
@@ -35,7 +36,9 @@ function read() {
       if (!Array.isArray(job.aliases) || !job.aliases.length || job.aliases.length > 20 || job.aliases.some(u => externalJobUrl(u) !== u) || !job.aliases.includes(job.url) || (job.employerUrl && !job.aliases.includes(job.employerUrl))) throw new Error();
       if (!Array.isArray(job.sources) || !job.sources.length || job.sources.some(s => !SOURCES.includes(s))) throw new Error();
       if (!Array.isArray(job.manualFields) || job.manualFields.some(k => !Object.hasOwn(FIELDS, k))) throw new Error();
-      if (!Array.isArray(job.queries) || job.queries.length > 12 || job.queries.some(q => typeof q !== 'string' || q.length > 700)) throw new Error();
+      if (!Array.isArray(job.queries) || job.queries.length > 12 || job.queries.some(q => typeof q !== 'string' || q.length > 1200)) throw new Error();
+      job.postedAt ??= '';
+      if (typeof job.postedAt !== 'string' || (job.postedAt && (!/^\d{4}-\d{2}-\d{2}$/.test(job.postedAt) || Number.isNaN(Date.parse(job.postedAt)) || !new Date(job.postedAt).toISOString().startsWith(job.postedAt)))) throw new Error();
       if (!Number.isFinite(Date.parse(job.firstSeenAt)) || !Number.isFinite(Date.parse(job.lastSeenAt))) throw new Error();
       for (const [key, max] of Object.entries(FIELDS)) if (typeof job[key] !== 'string' || job[key].length > max) throw new Error();
       job.keys = union(job.aliases.map(offerKey)); // never trust arbitrary stored association keys
@@ -44,8 +47,15 @@ function read() {
   return state;
 }
 function write(state) {
-  if (Buffer.byteLength(JSON.stringify(state, null, 2)) > MAX_BYTES) fail(400, 'Le catalogue de recherche est trop volumineux. Supprime des offres.');
-  writeJson(file(), state);
+  const next = { ...state, schema: 2 };
+  if (Buffer.byteLength(JSON.stringify(next, null, 2)) > MAX_BYTES) fail(400, 'Le catalogue de recherche est trop volumineux. Supprime des offres.');
+  // Read-only views never migrate. Before the first v2 write, retain the exact v1
+  // bytes for rollback to 0.5.0, which doesn't know the new source identifier.
+  if (state.schema === 1 && fs.existsSync(file())) {
+    const dir = ensureDir(path.join(DATA_DIR, 'backups', 'search'));
+    fs.copyFileSync(file(), path.join(dir, `discovery-v1-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`), fs.constants.COPYFILE_EXCL);
+  }
+  writeJson(file(), next);
 }
 function record(item) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) fail(400, 'Lien d’offre invalide.');
@@ -56,9 +66,11 @@ function record(item) {
   if (source === 'linkedin-manual' && !isLinkedIn(url)) fail(400, 'Le lien LinkedIn manuel doit pointer vers une offre LinkedIn.');
   const aliases = union([url, employerUrl].filter(Boolean));
   const fields = Object.fromEntries(Object.entries(FIELDS).map(([key, max]) => [key, text(item[key], max)]));
-  return { url, employerUrl, aliases, keys: union(aliases.map(offerKey)), ...fields,
-    sources: [source], queries: source === 'google' && item.query ? [text(item.query, 700)] : [],
-    manualFields: source === 'google' ? [] : Object.keys(FIELDS).filter(key => fields[key]),
+  const postedAt = source === 'linkedin-public' ? text(item.postedAt, 10) : '';
+  if (postedAt && (!/^\d{4}-\d{2}-\d{2}$/.test(postedAt) || Number.isNaN(Date.parse(postedAt)) || !new Date(postedAt).toISOString().startsWith(postedAt))) fail(400, 'Date de publication invalide.');
+  return { url, employerUrl, aliases, keys: union(aliases.map(offerKey)), ...fields, postedAt,
+    sources: [source], queries: ['google', 'linkedin-public'].includes(source) && item.query ? [text(item.query, 1200)] : [],
+    manualFields: ['manual', 'linkedin-manual'].includes(source) ? Object.keys(FIELDS).filter(key => fields[key]) : [],
   };
 }
 export function getSearch(profile = {}, applications = []) {
@@ -67,7 +79,7 @@ export function getSearch(profile = {}, applications = []) {
   for (const app of applications) {
     try { if (!appKeys.has(offerKey(app.job?.url))) appKeys.set(offerKey(app.job.url), { applicationId: app.id, applicationStatus: app.status }); } catch { /* legacy/unusual URLs */ }
   }
-  const jobs = state.jobs.map(job => ({ ...job, ...rankOffer(job, settings), ...(job.keys.map(key => appKeys.get(key)).find(Boolean) || {}) }));
+  const jobs = state.jobs.map(job => ({ ...job, ...catalogMeta(job), ...rankOffer(job, settings), ...(job.keys.map(key => appKeys.get(key)).find(Boolean) || {}) }));
   jobs.sort((a, b) => b.score - a.score || b.lastSeenAt.localeCompare(a.lastSeenAt));
   return { settings, jobs };
 }
@@ -88,6 +100,7 @@ function merge(target, incoming) {
   target.queries = union(target.queries, incoming.queries).slice(-12);
   target.manualFields = union(target.manualFields, incoming.manualFields);
   if (incoming.employerUrl) target.employerUrl = incoming.employerUrl;
+  if (incoming.postedAt) target.postedAt = incoming.postedAt;
 }
 export function addDiscoveries(items) {
   if (!Array.isArray(items) || !items.length || items.length > 100) fail(400, 'Ajoute entre 1 et 100 offres à la fois.');

@@ -3,6 +3,7 @@ import { applicationUrl, existingApplicationTab } from './navigation.mjs';
 import { chooseLanguage, translate } from './i18n.mjs';
 import { createSearchPanel } from '../search/panel.mjs';
 import { isDiscoveryPage, isLinkedIn } from '../search/core.mjs';
+import { catalogMeta } from '../search/catalog.mjs';
 const CONTENT_FILES = [
   'i18n.js',
   'content/dom.js',
@@ -52,6 +53,11 @@ const S = {
   app: null,
   recommendation: null,
   draft: null,
+  draftDirty: false,
+  appBusy: false,
+  switching: false,
+  searchSummary: null,
+  letterGeneration: null,
   page: null,
   pageError: '',
   prefs: { useAi: true, overwrite: false, addEntries: true, letterLang: 'auto' },
@@ -67,7 +73,7 @@ const S = {
   profileFields: [],
   profileDraft: {},
   profileBusy: false,
-  tab: 'app',
+  tab: 'home',
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -79,11 +85,7 @@ const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString(S.uiLanguage ==
 
 const searchPanel = createSearchPanel({ element: $('#tab-search'), stopButton: $('#headerSearchStop'), api, tr, esc, fmtDate, toast,
   canStart: () => !S.fillBusy,
-  activateApplication: async id => {
-    if (id === S.app?.id) return switchTab('app'); // resume without reloading its unsaved letter
-    if ((S.draftDirty || S.letterInstructions) && !confirm(tr('Changer de candidature et abandonner le brouillon de lettre non enregistré ?'))) return;
-    await setActiveApp(id); S.draftDirty = false; switchTab('app');
-  },
+  activateApplication,
 });
 
 function renderShell() {
@@ -93,7 +95,7 @@ function renderShell() {
   $('#uiLanguage').value = S.uiLanguage;
   $('#uiLanguageLabel').textContent = tr('Langue de l’interface');
   $('#serverStatus').title = `${tr('Revérifier la connexion au serveur')} · ${tr('Serveur')} v${S.health?.version || '—'}`;
-  for (const [tab, label] of [['app', 'Candidature'], ['search', 'Recherche'], ['journal', 'Journal'], ['profile', 'Profil']]) {
+  for (const [tab, label] of [['home', 'Accueil'], ['app', 'Candidature'], ['search', 'Recherche'], ['journal', 'Journal'], ['profile', 'Profil']]) {
     $(`[data-tab="${tab}"]`).textContent = tr(label);
   }
 }
@@ -108,6 +110,7 @@ async function setUiLanguage(language) {
   await chrome.storage.local.set({ uiLanguage: language });
   renderShell();
   renderStatus();
+  renderHome();
   renderApp();
   renderJournal();
   searchPanel.render();
@@ -156,17 +159,23 @@ async function checkServer() {
     S.cvs = cvs;
     S.apps = applications;
     if (statuses) S.statuses = statuses;
+    try {
+      const { jobs } = await api('/search');
+      S.searchSummary = { total: jobs.length, identified: jobs.filter(job => catalogMeta(job).kind === 'job').length, saved: jobs.filter(job => job.status === 'saved').length };
+    } catch { S.searchSummary = null; }
   } catch (e) {
     S.health = null;
     S.serverError = e.message;
   }
   renderShell();
   renderStatus();
+  renderHome();
 }
 
 async function loadApps() {
   const { applications } = await api('/applications');
   S.apps = applications;
+  renderHome();
 }
 
 // ---------------------------------------------------------------------------
@@ -226,8 +235,8 @@ async function refreshPage() {
   const tab = await activeTab();
   if (!tab || !scriptable(tab.url)) {
     S.page = null;
-    S.pageError = isLinkedIn(tab?.url) ? 'LinkedIn reste manuel : utilise Recherche pour importer un lien ou ouvrir le site employeur.' : 'Ouvre une offre de stage ou un formulaire de candidature.';
-    renderPage();
+    S.pageError = isLinkedIn(tab?.url) ? 'Utilise Recherche pour le prototype LinkedIn ou un ajout manuel. L’analyse et le remplissage restent désactivés sur LinkedIn.' : 'Ouvre une offre de stage ou un formulaire de candidature.';
+    renderPage(); renderHome();
     return;
   }
   try {
@@ -250,25 +259,38 @@ async function refreshPage() {
       const current = frames.find((f) => f.frameId === old.frameId);
       return !current || current.pageIdentity !== old.pageIdentity;
     }))) stopFill({ pageChanged: true });
-    const match = S.apps.find((a) => a.jobKey && a.jobKey === S.page.jobKey);
-    if (match && match.id !== S.app?.id && !S.draftDirty && !S.letterInstructions) await setActiveApp(match.id, { quiet: true });
+    // Detecting a page only updates context. Resumption always requires a click.
   } catch (e) {
     S.page = null;
     S.pageError = e.message;
   }
   renderPage();
   renderAppCard();
+  renderHome();
 }
 
 // ---------------------------------------------------------------------------
 // Candidatures
 // ---------------------------------------------------------------------------
+const hasLetterDraft = () => S.draftDirty || S.letterInstructions !== (S.app?.letter?.instructions || '');
+function confirmApplicationSwitch() {
+  if (S.letterBusy || S.appBusy || S.switching) throw new Error('Attends la fin de l’opération sur cette candidature.');
+  return !hasLetterDraft() || confirm(tr('Changer de candidature et abandonner le brouillon de lettre non enregistré ?'));
+}
+async function activateApplication(id) {
+  if (id === S.app?.id) return switchTab('app');
+  if (!confirmApplicationSwitch()) return;
+  S.switching = true;
+  try { await setActiveApp(id); switchTab(id ? 'app' : 'home'); }
+  finally { S.switching = false; }
+}
 async function setActiveApp(id, { quiet = false } = {}) {
   if (S.fillRun) stopFill();
-  S.letterInstructions = '';
   if (!id) {
     S.app = null;
     S.draft = null;
+    S.draftDirty = false;
+    S.letterInstructions = '';
     S.fill = null;
     await chrome.storage.local.remove(['activeAppId', 'activeAppCompany']);
     renderApp();
@@ -276,6 +298,8 @@ async function setActiveApp(id, { quiet = false } = {}) {
   }
   const { application, recommendation, requirements } = await api(`/applications/${encodeURIComponent(id)}`);
   S.app = application;
+  S.draftDirty = false;
+  S.letterInstructions = application.letter?.instructions || '';
   S.recommendation = recommendation;
   S.requirements = requirements || [];
   S.draft = application.letter ? { subject: application.letter.subject, body: application.letter.body } : null;
@@ -286,6 +310,9 @@ async function setActiveApp(id, { quiet = false } = {}) {
 }
 
 async function analyze() {
+  if (!confirmApplicationSwitch()) return;
+  S.appBusy = true;
+  try {
   const frames = await runInTab('extractJob');
   const jobs = frames
     .map((f) => f.job)
@@ -299,7 +326,9 @@ async function analyze() {
   S.recommendation = recommendation;
   S.requirements = requirements || S.requirements || [];
   renderAppCard();
+  switchTab('app');
   toast(existed ? 'Offre déjà connue : candidature reprise' : 'Offre analysée ✓');
+  } finally { S.appBusy = false; }
 }
 
 async function patchApp(body) {
@@ -314,7 +343,10 @@ async function patchApp(body) {
 // ---------------------------------------------------------------------------
 let tickTimer = null;
 async function generateLetter() {
-  if (!S.app) return;
+  if (!S.app || S.letterBusy || S.appBusy) return;
+  if (S.draftDirty && !confirm(tr('Régénérer la lettre et remplacer le brouillon non enregistré ?'))) return;
+  const appId = S.app.id, instructions = S.letterInstructions;
+  S.letterGeneration = S.health?.generation?.letter || null;
   S.letterBusy = true;
   S.letterT0 = Date.now();
   renderLetter();
@@ -324,13 +356,15 @@ async function generateLetter() {
     if (el) el.textContent = `${Math.round((Date.now() - S.letterT0) / 1000)} s`;
   }, 1000);
   try {
-    const instructions = $('#letterInstructions')?.value || '';
-    const { application, letter } = await api(`/applications/${encodeURIComponent(S.app.id)}/letter`, {
+    const settings = await api('/generation');
+    if (S.health) S.health.generation = settings;
+    S.letterGeneration = settings.letter;
+    renderLetter();
+    const { application, letter } = await api(`/applications/${encodeURIComponent(appId)}/letter`, {
       method: 'POST',
       body: { language: S.prefs.letterLang, instructions, cvId: S.app.cvId, uiLanguage: S.uiLanguage },
     });
-    S.app = application;
-    S.draft = { subject: letter.subject, body: letter.body };
+    if (S.app?.id === appId) { S.app = application; S.draft = { subject: letter.subject, body: letter.body }; S.draftDirty = false; }
     await loadApps();
     toast('Lettre générée ✓ — relis-la avant d’envoyer');
   } catch (e) {
@@ -343,15 +377,19 @@ async function generateLetter() {
 }
 
 async function saveLetter() {
-  if (!S.app || !S.draft) return;
+  if (!S.app || !S.draft || S.appBusy || S.letterBusy) return;
+  S.appBusy = true;
+  const savedDraft = { ...S.draft };
+  try {
   const { application } = await api(`/applications/${encodeURIComponent(S.app.id)}/letter`, {
     method: 'PUT',
-    body: { subject: S.draft.subject, body: S.draft.body },
+    body: { subject: savedDraft.subject, body: savedDraft.body },
   });
   S.app = application;
-  S.draftDirty = false;
+  S.draftDirty = S.draft.subject !== savedDraft.subject || S.draft.body !== savedDraft.body;
   renderLetter();
   toast('PDF mis à jour ✓');
+  } finally { S.appBusy = false; }
 }
 
 function letterUrl() {
@@ -514,6 +552,31 @@ async function markSubmitted() {
 // ---------------------------------------------------------------------------
 // Rendu
 // ---------------------------------------------------------------------------
+function renderHome() {
+  const el = $('#tab-home');
+  const ongoing = S.apps.filter(app => app.status === 'en cours').length;
+  const sent = S.apps.filter(app => app.status === 'soumise').length;
+  const recent = S.apps.slice(0, 5);
+  const current = S.page && S.apps.find(app => app.jobKey && app.jobKey === S.page.jobKey);
+  const context = current
+    ? `<h3>${esc(current.company)} · ${esc(current.title)}</h3><button class="btn" data-activate="${esc(current.id)}">${tr('Reprendre cette candidature')}</button>`
+    : S.page?.isPosting
+      ? `<h3>${esc(S.page.title)}</h3><div class="muted small">${esc(S.page.company)}</div><button class="btn primary" data-action="analyze" ${S.health ? '' : 'disabled'}>${tr('Analyser cette offre')}</button>`
+      : `<div class="small muted">${esc(tr(S.page?.fieldCount ? 'Un formulaire est ouvert. Choisis une candidature ou utilise le remplissage du profil.' : S.pageError || 'Ouvre une offre pour l’analyser, ou commence par une recherche.'))}</div>${S.page?.fieldCount ? `<button class="btn" data-tab="app">${tr('Voir le formulaire')}</button>` : ''}`;
+  el.innerHTML = `<div class="card home-hero"><h2>${tr('Ta prochaine candidature')}</h2><p>${tr('Trouve une offre, examine-la, puis choisis quand commencer ou reprendre une candidature.')}</p>
+      <div class="row"><button class="btn primary" data-tab="search">${tr('Trouver des stages')}</button><button class="btn" data-tab="journal">${tr('Voir le suivi')}</button></div>
+      <p class="small muted">${tr('Aucune reprise automatique. Quitter une candidature ne la marque pas comme soumise.')}</p></div>
+    <div class="home-metrics">
+      <button class="card" data-tab="search"><b>${S.searchSummary?.identified ?? '—'}</b><span>${tr('Offres identifiées')}</span></button>
+      <button class="card" data-tab="journal"><b>${ongoing}</b><span>${tr('En cours')}</span></button>
+      <button class="card" data-tab="journal"><b>${sent}</b><span>${tr('Soumises')}</span></button>
+    </div>
+    <div class="card"><h2>${tr('Onglet actuel')}</h2><div class="stack">${context}</div></div>
+    ${S.app ? `<div class="card"><h2>${tr('Candidature ouverte dans ce panneau')}</h2><div>${esc(S.app.job.company)} · ${esc(S.app.job.title)}</div>${hasLetterDraft() ? `<div class="small muted">${tr('Ton brouillon est conservé tant que le panneau reste ouvert.')}</div>` : ''}<button class="btn" data-activate="${esc(S.app.id)}">${tr('Reprendre')}</button></div>` : ''}
+    <div class="card"><h2>${tr('Candidatures récentes')}</h2>${recent.length ? `<ul class="list">${recent.map(app => `<li><div class="row"><b class="grow">${esc(app.company || '?')}</b><span class="badge grey">${esc(statusLabel(app.status))}</span></div><div>${esc(app.title)}</div><button class="btn ghost" data-activate="${esc(app.id)}">${tr(app.status === 'en cours' ? 'Reprendre' : 'Consulter')}</button></li>`).join('')}</ul>` : `<div class="small muted">${tr('Aucune candidature pour l’instant.')}</div>`}</div>
+    ${S.health?.warnings?.length ? `<div class="card small"><b>${tr('Profil à compléter')}</b><p>${esc(tr('{count} point(s) du profil à vérifier avant de postuler.', { count: S.health.warnings.length }))}</p><button class="btn ghost" data-tab="profile">${tr('Vérifier mon profil')}</button></div>` : ''}`;
+}
+
 function renderStatus() {
   const el = $('#serverStatus');
   const off = $('#offline');
@@ -541,7 +604,9 @@ function renderPage() {
   const known = S.apps.find((a) => a.jobKey && a.jobKey === p.jobKey);
   const step = p.step?.name ? ` · ${tr('étape')} ${p.step.index ? `${p.step.index}/${p.step.total} ` : ''}${esc(p.step.name)}` : '';
   let action = '';
-  if (p.isPosting && !known) {
+  if (known && known.id !== S.app?.id) {
+    action = `<h3>${esc(known.company)} · ${esc(known.title)}</h3><button class="btn primary" data-activate="${esc(known.id)}">${tr('Reprendre cette candidature')}</button>`;
+  } else if (p.isPosting && !known) {
     action = `<div class="stack"><div><span class="badge">${tr('Offre détectée')}</span></div>
       <h3>${esc(p.title || tr('Offre sans titre'))}</h3><div class="muted">${esc(p.company || '')}</div>
       <button class="btn primary big" data-action="analyze">${tr('Analyser cette offre')}</button></div>`;
@@ -593,9 +658,15 @@ function renderAppCard() {
       <div class="row">
         ${a.job?.url ? `<button class="btn ghost" data-action="openJob">${tr('Voir l’offre')}</button>` : ''}
         <span class="grow"></span>
-        <button class="btn ghost" data-action="newApp" title="${tr('Désactiver (l’historique reste dans le Journal)')}">${tr('Changer d’offre')}</button>
+        <button class="btn ghost" data-action="newApp" title="${tr('Désactiver (l’historique reste dans le Journal)')}">${tr('Quitter cette candidature')}</button>
       </div>
     </div>`;
+}
+
+function generationHtml(generation, observed = false) {
+  if (!generation) return `<div class="small muted generation-info">${tr(observed ? 'Ancienne lettre : modèle et effort non enregistrés.' : 'Paramètres de génération indisponibles.')}</div>`;
+  const model = observed ? (generation.model ? [generation.provider, generation.model].filter(Boolean).join('/') : tr('Modèle non rapporté par pi')) : generation.requestedModel || tr('Automatique — choisi par pi');
+  return `<div class="small generation-info"><b>${tr(observed ? 'Dernière génération · rapportée par pi' : 'Prochaine génération')}</b><div>${tr('Modèle')} : <span class="generation-model">${esc(model)}</span></div><div>${tr('Effort demandé')} : <b>${esc(generation.requestedThinking || tr('Valeur par défaut de pi'))}</b></div><div class="muted">${tr('Le niveau réellement appliqué n’est pas rapporté par pi. Aucun raisonnement interne n’est affiché.')}</div></div>`;
 }
 
 function renderLetter() {
@@ -610,11 +681,11 @@ function renderLetter() {
     </select>`;
   if (S.letterBusy) {
     el.innerHTML = `<h2>${tr('Lettre de motivation')}</h2><div class="busy"><span class="spinner"></span>${tr('pi rédige ta lettre…')} <span id="letterTimer">0 s</span>
-      <div class="small" style="font-weight:400">${tr('Environ 20 à 60 s.')}</div></div>`;
+      <div class="small" style="font-weight:400">${tr('Environ 20 à 60 s.')}</div></div>${generationHtml(S.letterGeneration)}`;
     return;
   }
   const head = `<h2><span>${tr('Lettre de motivation')}</span>${L ? `<span class="badge ok">${esc((L.language || '').toUpperCase())} · ${tr('PDF prêt')}</span>` : ''}</h2>`;
-  const gen = `<details ${L ? '' : 'open'}><summary>${tr(L ? 'Régénérer' : 'Générer')} ${tr('avec des consignes (facultatif)')}</summary>
+  const gen = `${generationHtml(S.health?.generation?.letter)}<details ${L ? '' : 'open'}><summary>${tr(L ? 'Régénérer' : 'Générer')} ${tr('avec des consignes (facultatif)')}</summary>
       <textarea id="letterInstructions" rows="2" placeholder="${tr('Ex. : insiste sur mon projet RL, ton plus formel, mentionne ma disponibilité à temps plein…')}">${esc(S.letterInstructions)}</textarea></details>
     <div class="row">${langSel}<span class="grow"></span><button class="btn ${L ? '' : 'primary'}" data-action="generate">${tr(L ? 'Régénérer' : 'Générer la lettre')}</button></div>`;
   if (!L || !S.draft) {
@@ -622,6 +693,7 @@ function renderLetter() {
     return;
   }
   el.innerHTML = `${head}<div class="stack">
+    ${generationHtml(L.generation, true)}${L.editedAfterGeneration ? `<div class="small muted">${tr('Lettre modifiée manuellement après la génération.')}</div>` : ''}
     <div><label class="field" for="letterSubject">${tr('Objet')}</label><input type="text" id="letterSubject" value="${esc(S.draft.subject)}"></div>
     <div><label class="field" for="letterBody">${tr('Texte (paragraphes séparés par une ligne vide, sans la signature)')}</label>
       <textarea id="letterBody">${esc(S.draft.body)}</textarea></div>
@@ -703,6 +775,7 @@ function renderFill() {
 }
 
 function renderApp() {
+  renderHome();
   renderPage();
   renderAppCard();
   renderLetter();
@@ -860,6 +933,7 @@ function switchTab(name) {
   S.tab = name;
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
+  if (name === 'home') { renderHome(); checkServer(); }
   if (name === 'journal') loadApps().then(renderJournal, () => renderJournal());
   if (name === 'profile') checkServer().then(renderProfile);
   if (name === 'app') renderApp();
@@ -877,8 +951,6 @@ const ACTIONS = {
   recheck: async () => {
     await checkServer();
     if (S.health) {
-      const { activeAppId } = await chrome.storage.local.get('activeAppId');
-      if (activeAppId && !S.app) await setActiveApp(activeAppId, { quiet: true }).catch(() => {});
       schedulePageRefresh(0);
       toast('Serveur connecté ✓');
     }
@@ -908,13 +980,14 @@ const ACTIONS = {
       toast('Formulaire déjà ouvert — saisies conservées');
     } else await chrome.tabs.create({ url });
   },
-  newApp: () => setActiveApp(null),
+  newApp: () => activateApplication(null),
   fill: () => fillPage(),
   stopFill: () => stopFill(),
   memorize: () => captureMemory(),
   submitted: () => markSubmitted(),
   exportCsv: () => chrome.tabs.create({ url: `${S.server}/journal.csv` }),
   saveServer: async () => {
+    if (S.letterBusy || S.appBusy || S.switching) throw new Error('Attends la fin de l’opération sur cette candidature.');
     searchPanel.reset();
     S.server = ($('#serverUrl').value || DEFAULT_SERVER).replace(/\/+$/, '');
     S.serverDraft = null;
@@ -942,11 +1015,9 @@ document.addEventListener('click', async (e) => {
     if (t.dataset.focus) return runInTab('focus', { id: t.dataset.focus });
     if (t.dataset.openUrl) return chrome.tabs.create({ url: t.dataset.openUrl });
     if (t.dataset.openLetter) return chrome.tabs.create({ url: `${S.server}/applications/${encodeURIComponent(t.dataset.openLetter)}/letter.pdf` });
-    if (t.dataset.activate) {
-      await setActiveApp(t.dataset.activate);
-      return switchTab('app');
-    }
+    if (t.dataset.activate) return activateApplication(t.dataset.activate);
     if (t.dataset.delete) {
+      if (t.dataset.delete === S.app?.id && (S.letterBusy || S.appBusy)) throw new Error('Attends la fin de l’opération sur cette candidature.');
       const a = S.apps.find((x) => x.id === t.dataset.delete);
       if (!confirm(tr('Supprimer la candidature « {name} » et sa lettre ?', { name: `${a?.company || ''} — ${a?.title || ''}` }))) return;
       await api(`/applications/${encodeURIComponent(t.dataset.delete)}`, { method: 'DELETE' });
@@ -994,7 +1065,7 @@ document.addEventListener('change', async (e) => {
       await patchApp({ cvId: t.value });
       toast('CV choisi ✓');
     } else if (t.id === 'pickApp' && t.value) {
-      await setActiveApp(t.value);
+      await activateApplication(t.value);
     } else if (t.id === 'letterLang') {
       S.prefs.letterLang = t.value;
       await savePrefs();
@@ -1051,18 +1122,15 @@ setInterval(() => {
 // Démarrage
 // ---------------------------------------------------------------------------
 (async function init() {
-  const stored = await chrome.storage.local.get(['serverUrl', 'prefs', 'activeAppId', 'uiLanguage']);
+  const stored = await chrome.storage.local.get(['serverUrl', 'prefs', 'uiLanguage']);
   S.uiLanguage = chooseLanguage(stored.uiLanguage, navigator.language);
   renderShell();
   S.server = (stored.serverUrl || DEFAULT_SERVER).replace(/\/+$/, '');
   S.prefs = { ...S.prefs, ...(stored.prefs || {}) };
   renderApp();
   await checkServer();
-  if (S.health && stored.activeAppId) await setActiveApp(stored.activeAppId, { quiet: true }).catch(() => chrome.storage.local.remove('activeAppId'));
-  if (S.health && !S.app) {
-    const ongoing = S.apps.filter((a) => a.status === 'en cours');
-    if (ongoing.length === 1) await setActiveApp(ongoing[0].id, { quiet: true });
-  }
+  // Do not restore an old or sole ongoing application automatically.
+  renderHome();
   renderApp();
   await refreshPage();
 })();

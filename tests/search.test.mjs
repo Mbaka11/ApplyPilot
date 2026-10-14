@@ -142,6 +142,23 @@ test('malformed catalogs fail closed instead of silently overwriting valuable da
     assert.equal(fs.readFileSync(file, 'utf8'), bad);
   }
 });
+test('legacy catalog upgrades only on a write, with an exact private backup', () => {
+  reset(); addDiscoveries([sample]);
+  const state = JSON.parse(fs.readFileSync(file, 'utf8')); state.schema = 1; delete state.jobs[0].postedAt;
+  const legacy = JSON.stringify(state); fs.writeFileSync(file, legacy);
+  assert.equal(getSearch().jobs.length, 1);
+  assert.equal(fs.readFileSync(file, 'utf8'), legacy, 'GET must not migrate data');
+  addDiscoveries([{ url: linked, source: 'linkedin-public', title: 'Public LinkedIn title', company: 'Example', postedAt: '2026-10-12' }]);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).schema, 2);
+  const dir = path.join(DATA, 'backups/search');
+  assert.ok(fs.readdirSync(dir).some(name => fs.readFileSync(path.join(dir, name), 'utf8') === legacy));
+  const item = getSearch().jobs.find(job => job.url === linked);
+  assert.deepEqual(item.manualFields, []);
+  assert.equal(item.postedAt, '2026-10-12');
+  importDiscoveries({ links: linked, details: { title: 'Reviewed manual title' } });
+  addDiscoveries([{ url: linked, source: 'linkedin-public', title: 'Later automated title' }]);
+  assert.equal(getSearch().jobs.find(job => job.url === linked).title, 'Reviewed manual title');
+});
 test('catalog capacity is enforced atomically but rediscovery of existing jobs still works', () => {
   reset(); addDiscoveries([sample]);
   const state = JSON.parse(fs.readFileSync(file, 'utf8')), base = state.jobs[0];

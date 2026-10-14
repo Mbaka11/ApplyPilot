@@ -7,7 +7,7 @@ import { getConfig } from '../server/src/config.js';
 import { findChrome, puppeteer } from '../server/src/pdf.js';
 
 const settings = { ...searchDefaults(), maxPages: 2 };
-const row = { url: 'https://jobs.example.org/internship?utm_source=google', title: 'Software internship', snippet: 'Fictional results' };
+const row = { url: 'https://jobs.example.org/jobs/fixture-internship?utm_source=google', title: 'Software internship', snippet: 'Fictional results' };
 const fast = { wait: async () => {}, pollMs: 0, betweenMs: 0, pollLimit: 5 };
 function mock({ status = 'ready', onRead, onGet, onUpdate } = {}) {
   const calls = { create: [], update: [], inject: [], pages: [], reads: 0, gets: 0 };
@@ -39,12 +39,12 @@ test('Google runner owns one inactive new tab and uses only top-frame/document-b
   assert.ok(m.calls.update.every(call => new URL(call.url).hostname === 'www.google.com'));
   assert.ok(m.calls.inject.filter(call => call.files).every(call => call.target.frameIds.join() === '0'));
   assert.equal(result.found, 2); assert.equal(m.calls.pages.length, 2);
-  assert.equal(m.calls.pages[0][0].url, 'https://jobs.example.org/internship');
+  assert.equal(m.calls.pages[0][0].url, 'https://jobs.example.org/jobs/fixture-internship');
 });
 test('runner bounds results, validates destinations, deduplicates and never visits them', async () => {
-  const m = mock({ onRead: tab => ({ status: 'ready', href: tab.url, items: [row, { ...row, url: row.url + '&ref=duplicate' }, { ...row, url: 'http://localhost/private' }] }) });
+  const m = mock({ onRead: tab => ({ status: 'ready', href: tab.url, items: [row, { ...row, url: row.url + '&ref=duplicate' }, { ...row, url: 'http://localhost/private' }, { ...row, url: 'https://ca.indeed.com/jobs?q=software' }] }) });
   const result = await m.run({ settings: { ...settings, maxPages: 1 } });
-  assert.equal(result.found, 1); assert.equal(result.skipped, 1);
+  assert.equal(result.found, 1); assert.equal(result.skipped, 2);
   assert.equal(m.calls.update.length, 1);
 });
 for (const status of ['challenge', 'consent', 'blocked', 'navigation']) test(`runner stops on ${status}, no retry, result save or next query`, async () => {

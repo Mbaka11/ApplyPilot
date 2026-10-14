@@ -1,4 +1,5 @@
 import { buildSearchPlan, isExpectedSearch, externalJobUrl, offerKey } from './core.mjs';
+import { classifyJobLink } from './catalog.mjs';
 
 const stopped = () => Object.assign(new Error('Recherche arrêtée.'), { name: 'AbortError' });
 const checkpoint = signal => { if (signal?.aborted) throw stopped(); };
@@ -93,6 +94,7 @@ export async function runGoogleSearch({ settings, chrome: browser = globalThis.c
       for (const item of (result.items || []).slice(0, 30)) {
         try {
           const url = externalJobUrl(item.url), key = offerKey(url);
+          if (classifyJobLink(url).kind === 'listing') { skipped++; continue; }
           if (seen.has(key)) continue;
           if (typeof item.title !== 'string' || !item.title.trim()) throw new Error();
           seen.add(key);

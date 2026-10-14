@@ -106,9 +106,9 @@ letter: { signatureName: Marie Tremblay }
 
 async function main() {
   prepareFixtures();
-  const srv = spawn(process.execPath, ['server/src/index.js'], {
+  const srv = spawn(process.execPath, ['--import', './tests/fixtures/mock-linkedin.mjs', 'server/src/index.js'], {
     cwd: ROOT,
-    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA, APPLYPILOT_PROFILE: TEST_PROFILE, APPLYPILOT_CONFIG: TEST_CONFIG, APPLYPILOT_CV_DIR: path.join(OUT, 'cvs'), APPLYPILOT_FAKE_PI_DIR: path.join(OUT, 'fake-pi') },
+    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA, APPLYPILOT_PROFILE: TEST_PROFILE, APPLYPILOT_CONFIG: TEST_CONFIG, APPLYPILOT_CV_DIR: path.join(OUT, 'cvs'), APPLYPILOT_FAKE_PI_DIR: path.join(OUT, 'fake-pi'), APPLYPILOT_LINKEDIN_FIXTURE: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';
@@ -164,6 +164,15 @@ async function main() {
     check('recherche : catalogue corrompu conservé', brokenSearch.status === 409 && fs.readFileSync(searchFile, 'utf8') === '{unreadable');
     fs.writeFileSync(searchFile, validCatalog);
     check('recherche : aucun journal de candidature créé', !fs.existsSync(path.join(DATA, 'candidatures.csv')));
+    const experimental = { settings: searchSettings.data.settings, index: 0, acknowledgeExperimental: true };
+    const refusedPrototype = await api('POST', '/search/linkedin', experimental, { origin: 'https://evil.example.com' });
+    check('public LinkedIn route retains the origin boundary', refusedPrototype.status === 403);
+    check('public LinkedIn route requires the experimental flag', (await api('POST', '/search/linkedin', { settings: experimental.settings })).status === 400);
+    const direct = await api('POST', '/search/linkedin', experimental);
+    const directJobs = direct.data.jobs?.filter(job => job.sources.includes('linkedin-public')) || [];
+    check('public fixture cards become independent postings with correct provenance', direct.status === 200 && directJobs.length === 3 && directJobs.every(job => job.kind === 'job' && job.manualFields.length === 0 && job.platforms.includes('linkedin')));
+    check('public response exposes bounded evidence but not HTML, cookies or applications', !!direct.data.evidence?.sha256 && !direct.data.html && (await api('GET', '/applications')).data.applications.length === 0 && !fs.existsSync(path.join(DATA, 'candidatures.csv')));
+    for (const job of directJobs) await api('DELETE', `/search/jobs/${job.id}`);
 
     console.log('Éditeur du profil (données fictives isolées)');
     const firstProfile = await api('GET', '/profile');
@@ -320,7 +329,7 @@ Posting End Date 2026-10-14`,
     console.log('Cancellation — HTTP disconnect must stop pi (fake CLI, no provider quota)');
     const originalConfig = fs.readFileSync(TEST_CONFIG, 'utf8');
     const markerDir = path.join(OUT, 'fake-pi');
-    fs.appendFileSync(TEST_CONFIG, `llm:\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`);
+    fs.appendFileSync(TEST_CONFIG, `llm:\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`);
     const controller = new AbortController();
     let cancelledPid;
     try {
@@ -342,6 +351,18 @@ Posting End Date 2026-10-14`,
       check('server remains responsive after cancellation', (await api('GET', '/health')).status === 200);
       const afterCancellation = await api('GET', `/applications/${app.id}`);
       check('cancellation does not modify the application or its letter', afterCancellation.data.application.status === 'en cours' && afterCancellation.data.application.letter.body === SAMPLE_BODY);
+      const configView = await api('GET', '/generation');
+      check('model/effort preview contains only display settings', configView.data.letter.requestedModel === 'fixture/requested' && configView.data.letter.requestedThinking === 'medium' && !JSON.stringify(configView.data).includes('command'));
+      const pendingLetter = api('POST', `/applications/${app.id}/letter`, { language: 'en', instructions: 'SYNTHETIC_INSTRUCTION_CANARY' });
+      await new Promise(resolve => setTimeout(resolve, 150));
+      await api('PATCH', `/applications/${app.id}`, { status: 'entrevue', notes: 'Concurrent synthetic note' });
+      const generated = await pendingLetter;
+      check('letter generation records reported model separately from request settings', generated.status === 200 && generated.data.letter?.generation?.model === 'demo-observed' && generated.data.letter.generation.requestedModel === 'fixture/requested' && generated.data.letter.generation.requestedThinking === 'medium');
+      check('generation does not overwrite status or notes changed during the provider call', generated.data.application?.status === 'entrevue' && generated.data.application?.notes === 'Concurrent synthetic note');
+      check('no reasoning block is saved in the generated application', !JSON.stringify(generated.data).includes('PRIVATE_REASONING_CANARY'));
+      const edited = await api('PUT', `/applications/${app.id}/letter`, { subject: 'Reviewed synthetic letter' });
+      check('editing a generated letter preserves provenance and marks the edit', edited.data.letter?.editedAfterGeneration && JSON.stringify(edited.data.letter.generation) === JSON.stringify(generated.data.letter.generation));
+      await api('PATCH', `/applications/${app.id}`, { status: 'en cours' });
     } finally {
       controller.abort();
       fs.writeFileSync(TEST_CONFIG, originalConfig);

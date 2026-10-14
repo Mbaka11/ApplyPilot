@@ -1,13 +1,16 @@
 # ApplyPilot
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
 ![Chrome extension](https://img.shields.io/badge/Chrome-Manifest_V3-green)
 ![Interface](https://img.shields.io/badge/interface-English_%2F_Fran%C3%A7ais-purple)
 
+> **LinkedIn integration is experimental.** Its public surface returned 200 during an initial probe, then 429 during connector validation. It is **not a reliable or officially supported integration**. Version 0.6.0 includes the bounded connector with these limitations, not a claim of production readiness. See the [investigation and verification notes](docs/prototype.md).
+
 **Apply to internships faster, without typing the same information again.** ApplyPilot pairs a Chrome side panel with a small local Node.js server:
 
-- 🔍 **Internship discovery** — bounded Google searches, prepared LinkedIn links and manual imports, with editable filters and a local discovery catalog separate from applications.
-- 📄 **Tailored cover letters** — pi reads the posting and your CV source, drafts in the posting’s language and your style, and produces an editable, one-page PDF.
+- 🏠 **Contextual home** — discovery, current-page actions, tracking counts and explicit resumption; no forced return to the last application.
+- 🔍 **Internship discovery** — job-link classification, platform badges and separate provenance filters. Bounded Google collection, an experimental public LinkedIn connector, and manual imports share a catalog independent of applications.
+- 📄 **Tailored cover letters** — pi drafts editable, one-page PDFs using the posting and your CV source. See the requested model/effort before generation and the model reported by pi afterward; old letters are not assigned invented metadata.
 - ✍️ **Form autofill** — Workday is the priority: contact details, addresses, phone numbers, experience, education, dates, eligibility questions, languages and websites. Generic forms, including Greenhouse- and Lever-style pages, are also supported.
 - 📎 **Attachments** — select an appropriate French, English or specialized CV; attach it, your cover letter and your configured transcript when relevant.
 - 🧠 **Open questions** — generate suggested answers without inventing missing profile facts. AI answers always require review.
@@ -20,7 +23,7 @@
 
 > ApplyPilot **never clicks Submit**. It fills, highlights what needs review, and leaves submission to you.
 
-<p align="center"><img src="docs/panneau.png" width="320" alt="ApplyPilot English side panel with the visible version and cover-letter editor"> &nbsp; <img src="docs/remplissage-workday.png" width="460" alt="English Workday fixture filled with fictional candidate details"></p>
+<p align="center"><img src="docs/prototype/home.png" width="320" alt="ApplyPilot 0.6.0 home with explicit application resumption"> &nbsp; <img src="docs/prototype/search.png" width="320" alt="Synthetic LinkedIn posting cards with separate platform and discovery filters"></p>
 
 *Screenshots use fictional candidates, employers and postings. They are not evidence of a real application or submission.*
 
@@ -71,8 +74,8 @@ Requirements:
 
 ### Update without losing an open form
 
-1. Update your local checkout, for example with `git pull --ff-only`.
-2. Restart the local server if the release changes it.
+1. **Save panel drafts first**; draft retention across tabs is not a guarantee across extension reloads. Update your checkout to the published release, for example with `git pull --ff-only`.
+2. Stop the local server, run `npm ci` inside `server/` to refresh locked dependencies, then restart it. Version 0.6.0 adds the HTML parser dependency; the startup scripts only install dependencies automatically on the first run.
 3. In `chrome://extensions`, click **↻ Reload** on ApplyPilot’s card. **Do not remove and reimport it.**
 4. Close and reopen the ApplyPilot panel. Check the **version beside its name**.
 5. Click **Fill this page**. Updated scripts are reinjected into the existing tab without navigating or reloading Workday.
@@ -87,17 +90,19 @@ Open **Search**, review the internship keywords, AI/software/data/consulting dom
 
 - One dedicated, inactive tab per run; **1–8 queries**, at most **30 links per page**, no automatic result visits or pagination.
 - **Stop search** works from every panel tab. Keep the panel open while searching; closing it also stops the run. Completed catalog batches remain saved, and the search tab is left open for inspection.
-- LinkedIn is **assisted, not scraped**: open prepared searches yourself, then paste job links and optional details. An employer link can merge equivalent Google/LinkedIn discoveries.
+- **LinkedIn · prototype** requests anonymous public HTML through the local server and displays parsed cards in the panel. It is undocumented, blocked in the latest live test, and subject to LinkedIn's automation restrictions. No cookies, accounts, browser attachment, redirects or retries are used. Manual browsing/import remains available separately.
+- The default catalog view shows **identified job links** rather than listing pages. Known aggregator listings are skipped during Google collection; old listing/unknown entries remain accessible without deletion.
+- Filter **Platform** separately from **Discovery method**: a Google-found LinkedIn URL is not evidence of direct LinkedIn collection.
 - Save, hide, restore, filter or delete catalog entries without creating applications. To apply, explicitly open the employer posting and use **Analyze this posting**.
 - Ranking is a simple keyword score, not an eligibility or vacancy check. Google can block collection or change its markup; there is no bypass and no exhaustive-results guarantee.
 
-Search does not invoke pi or send your CV/contact details to a model. Queries go to the selected website through your browser. See the [search workflow, limits, privacy and API contract](docs/search.md).
+Search does not invoke pi or send your CV/contact details to a model. Google queries go through a dedicated browser tab; experimental LinkedIn queries go directly from the server. See the [search workflow, limits, privacy and API contract](docs/search.md).
 
-<details><summary>Search preview (fictional, locally intercepted results)</summary><img src="docs/recherche.png" width="360" alt="ApplyPilot English search filters and independent discovery catalog with fictional internships"></details>
+<details><summary>Search preview (fictional fixtures, not evidence of live LinkedIn success)</summary><img src="docs/prototype/search.png" width="360" alt="Experimental discovery UI with synthetic postings"></details>
 
 ### Prepare an application
 
-1. Open a posting and click **Analyze this posting**. The application remains active as you move through form steps. The recommended CV is preselected (★).
+1. Start from **Home**. Analyze the current posting or explicitly resume a recent application. The selected application remains active through form steps; reopening the panel does not resume it automatically. **Leave this application** returns home without changing its tracker status. The recommended CV is preselected (★).
 2. **Generate cover letter**; allow roughly 20–60 seconds. Review the draft and warnings, edit it in the panel, then click **Update PDF**. You can choose French or English independently of the interface.
 3. Click **Apply / sign in**, then **Fill this page** on each step:
    - 🟩 **Green:** filled from your profile.
@@ -109,6 +114,10 @@ Search does not invoke pi or send your CV/contact details to a model. Queries go
 5. Track applications in **Tracker** and export CSV. The server also updates `data/candidatures.csv`.
 
 An incorrect submission mark can be reversed by selecting **In progress** in the tracker; the erroneous submission date is cleared.
+
+**Generation provenance:** the letter card distinguishes settings for the next call from the previous generation. Pi's JSON assistant events supply the reported provider/model. The requested reasoning level is retained, but **pi does not report the effective level**; neither private reasoning blocks nor signatures are stored or displayed. Legacy/manual letters show unknown attribution. Subsequent manual edits retain provenance and are labelled accordingly. Changing applications or regenerating asks before discarding a draft.
+
+<details><summary>Letter provenance preview (fake pi, no provider quota)</summary><img src="docs/prototype/letter.png" width="360" alt="Requested settings and observed model attribution for a synthetic cover letter"></details>
 
 ### Stop a blocked autofill
 
@@ -155,15 +164,15 @@ Editing a profile does not update existing CV PDFs or cover letters. Keep study 
 - **Local-first storage:** the server binds to `127.0.0.1` and checks `Host` and `Origin` to reject website-originated API requests.
 - `profile.yaml`, `config.yaml`, `data/`, credentials and test outputs are excluded from Git.
 - **AI is not offline:** relevant posting, profile, CV and letter information is sent to the provider configured in pi to generate text. Its privacy policy and usage limits apply.
-- Search terms go to Google, or to LinkedIn when you explicitly open a prepared search. No LinkedIn content scripts, credential export or account automation are used. Normal browser navigation may use the current website session.
-- The discovery catalog lives in `data/search/discovery.json`, independently of applications; imported text stays local unless you explicitly use it in another workflow.
+- Search terms go to Google or the experimental public LinkedIn endpoint when you start that source. The connector omits credentials; manual browser navigation can use the current website session. No LinkedIn content scripts, credential export or account automation are used.
+- The discovery catalog lives in `data/search/discovery.json`, independently of applications. Its first schema-2 mutation saves an exact private schema-1 backup; read-only views do not migrate it. Imported text stays local unless explicitly used in another workflow.
 - Passwords, CAPTCHA, signatures and consent controls are never completed automatically.
 - Unknown eligibility answers are not guessed. AI output is always marked for review.
 - ApplyPilot never submits applications. A tracker status alone is not proof of an employer submission.
 
 ## Limitations
 
-Sites vary. Unusual widgets can remain incomplete and need manual input. Workday is the priority, but fixtures cannot replace validation on a real employer form. Always review eligibility, attachments and generated text before submitting. Discovery tests use locally intercepted Google/LinkedIn fixtures; live Google collection has not been established by these tests. LinkedIn pages are excluded from automatic extraction and autofill.
+Sites vary. Unusual widgets can remain incomplete and need manual input. Workday is the priority, but fixtures cannot replace validation on a real employer form. Always review eligibility, attachments and generated text before submitting. Discovery tests use local browser and HTTP fixtures, not live search. Live Google relevance is not established; URL patterns do not verify vacancies. An initial public LinkedIn probe returned ten job links, but later connector validation received HTTP 429 and stopped without retry. LinkedIn browser pages remain excluded from extraction and autofill.
 
 ## Configuration reference
 
@@ -214,7 +223,8 @@ The bump command synchronizes release metadata and opens a changelog section. It
 | Skills search is typed but nothing is selected | Update ApplyPilot and retry: only verified pills count as selected |
 | Search asks to restart the server | Restart it, reload ApplyPilot in `chrome://extensions`, then reopen the panel; do not reload Workday |
 | Google requires verification/consent or no readable results appear | Collection stops. Inspect the dedicated tab manually, change filters, or import links; no bypass or auto-resume |
-| LinkedIn is not automatically analyzed | Intentional: use Search for manual imports or open the employer posting |
+| LinkedIn prototype returns 429, a challenge or a changed-format error | Stop; no bypass or auto-retry. Use an employer posting or manual import instead. |
+| LinkedIn page cannot be analyzed/autofilled | Intentional: search collection is separate; open the employer posting |
 | No profile editor | Restart the server and reload the extension |
 | Workday asks you to sign in again | Check the Chrome profile and employer portal; the session may have expired |
 | Cannot write a PDF | Close the file in Acrobat or another PDF reader |
@@ -231,7 +241,7 @@ npm run test:search          # helpers, catalog, runner and locally intercepted 
 set APPLYPILOT_TEST_LLM=1 && npm run test:server   # Windows
 ```
 
-Default tests use fictional profiles, simulated employer forms and a fake pi CLI. They check English/French preferences and drafts, actual subprocess cancellation, late-answer rejection, focus, asynchronous selection, recreated controls, collapsed pills and reinjection without navigation. Discovery tests additionally cover aliases, manual precedence, catalog limits/corruption, challenge stops, redirects, tab ownership and independent application state. New discovery tabs are intercepted before navigation, with synthetic Google/LinkedIn pages served locally. Tests never use real candidate data or contact an employer to submit anything.
+Default tests use fictional profiles, simulated employer forms and a fake pi CLI. They check English/French preferences and drafts, actual subprocess cancellation, late-answer rejection, focus, asynchronous selection, recreated controls, collapsed pills and reinjection without navigation. Discovery tests also cover link classification, source filters, schema backups, aliases, manual precedence, limits/corruption, HTTP cooldowns/cancellation, challenge stops, tab ownership and independent application state. Fake pi JSON events verify model provenance without retaining reasoning blocks. New discovery tabs are intercepted before navigation, with synthetic Google/LinkedIn pages served locally. Tests never use real candidate data or contact an employer to submit anything.
 
 ## Project layout
 

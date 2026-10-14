@@ -19,15 +19,17 @@
     </div>
 
     <nav class="tabs">
-      <button data-tab="app" class="active">Application</button>
+      <button data-tab="home" class="active">Home</button>
+      <button data-tab="app">Application</button>
       <button data-tab="search">Search</button>
       <button data-tab="journal">Tracker</button>
       <button data-tab="profile">Profile</button>
     </nav>
 
     <main>
-      <section id="tab-app" class="tab active">
-        <div id="offline" class="card warn hidden"></div>
+      <div id="offline" class="card warn hidden"></div>
+      <section id="tab-home" class="tab active"></section>
+      <section id="tab-app" class="tab">
         <div id="pageCard" class="card"></div>
         <div id="appCard" class="card"></div>
         <div id="letterCard" class="card"></div>

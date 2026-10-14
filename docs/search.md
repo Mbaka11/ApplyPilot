@@ -1,129 +1,161 @@
-# Internship discovery
+# Internship discovery — 0.6.0
 
-ApplyPilot 0.5.0 provides **bounded Google result collection + assisted LinkedIn searches**.
-It is not an exhaustive job index, a LinkedIn scraper, or an autonomous application agent.
+Version 0.5.0 used Google collection and manual LinkedIn links. Version 0.6.0 adds
+an **experimental** public LinkedIn HTTP connector, without treating that surface
+as an authorized, officially supported or reliable API. See [the investigation and
+verification boundaries](prototype.md).
 
 ## Workflow
 
-1. Open **Search** and review the keywords, domains, area, term and query budget.
-   Defaults include `intern, stagiaire, internship, stage`, AI/ML, software, data,
-   technology consulting, Greater Montréal and remote Canada. The term comes from
-   the profile's availability, when supplied. All filters are editable.
-2. Expand **Preview queries sent to Google** if desired. A smaller budget runs only
-   the first queries shown. Local and remote queries are interleaved by domain.
-3. **Search Google** creates one new, inactive tab. It reads result cards, not the
-   linked pages, and saves them to the local catalog. Keep the panel open.
-4. **Stop search** works from every panel tab. Closing the panel also aborts the run.
-   Previously accepted batches remain saved. A batch already received by the local
-   server may finish saving; Stop is not a rollback.
-5. Review the catalog. **Save**, **Hide**, **Restore**, **Delete** and the local text
-   filter affect discoveries only. Results and imported text are escaped for display.
-6. **Open posting** opens a new tab; it never navigates an existing form. When ready,
-   analyze the employer posting through **Application → Analyze this posting**.
-   This explicit application workflow, not discovery, creates a tracker record.
+1. Start from **Home → Find internships** or **Search**. Expand **Search filters**
+   for keywords, AI/ML/software/data/consulting domains, geography, term and budget.
+   Defaults remain editable; only the availability term comes from the profile.
+2. **Preview exact queries** lists both sources. Budgets are 1–8 queries, not
+   pagination. Local and remote queries are interleaved by domain.
+3. Choose **Search Google** or the explicit **LinkedIn · prototype** action.
+   Keep the panel open. The latter displays parsed job cards without opening a tab.
+4. **Stop search** is available across panel tabs. Closing the panel also stops
+   it. Stop cancels pending work and prevents subsequent queries, but does not roll
+   back batches already accepted by the local server.
+5. Review **identified job links** by default. Filter status, text, platform and
+   discovery method. Inspect unknown links or old listing pages in separate views.
+6. Save/hide/restore/delete affects discoveries only. **Open posting** creates a new
+   browser tab, not an application. Analyze the employer posting explicitly to
+   create an application; resuming an existing application is also explicit.
 
-A search-created tab is deliberately **left open** after completion, Stop or error.
-Use **View search tab** to inspect it and close it yourself when finished. ApplyPilot
-never takes another existing tab for a search, and stops if its own tab is closed,
-redirected or navigated to a different query. There is no automatic resume after a
-challenge, nor automatic result-page pagination.
+Search never navigates, reloads or closes a pre-existing application tab. It does
+not invoke pi, generate application documents, fill forms or submit anything.
 
-## LinkedIn is manual
+## Link quality, platform and provenance
 
-**LinkedIn search** and **LinkedIn · Remote Canada** open prepared links for you to
-browse. ApplyPilot does not inject its general content scripts into LinkedIn and
-refuses panel-triggered extraction or autofill there. It does not collect account
-traffic, read/export cookies, or replay undocumented LinkedIn APIs.
+A link classifier recognizes individual URLs on LinkedIn, Indeed and several ATS
+surfaces, and separates recognizable search/listing pages. Unrecognized URLs stay
+**unverified**, not silently promoted to jobs or deleted.
 
-Paste job links under **Manual import** (one per line, at most 50). An optional title
-can precede a link, e.g. `Software intern | https://jobs.example.org/internship`.
-For **one** link, you can also supply a title, company, location, employer URL and
-manually copied description. Supplying an employer URL links those two identities;
-it does not fetch either page. Imported text stays in its original language.
+- Google queries favor ATS/job-specific paths. Recognized listing URLs are skipped
+  before importing a collected batch. Unknown URLs may be saved for manual review,
+  but are not in the default job-only view.
+- Existing catalog rows are retained. Changing views is not a destructive cleanup.
+- URL classification does **not** verify whether a job exists, remains open, matches
+  the term, offers remote work or accepts the candidate.
+- **Platform** describes destinations/aliases: LinkedIn, Indeed, employer, etc.
+- **Discovery method** describes evidence: Google, public LinkedIn prototype, manual.
+  A Google snippet linking to LinkedIn does not become direct LinkedIn evidence.
+- Both dimensions survive alias merging. Badges use local text marks, not external
+  logo requests or an assertion of affiliation.
+- An explicitly linked aggregator listing cannot displace a known individual
+  posting as the primary opening destination.
 
-Google may return a publicly indexed LinkedIn job link/snippet. Such a discovery is
-labelled **Google**, not a claim that ApplyPilot read LinkedIn. Use LinkedIn manually
-or provide the employer link yourself. A logged-in session is not permission to scrape;
-respect [LinkedIn's agreement](https://www.linkedin.com/legal/user-agreement) and
-[automation restrictions](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibition-of-scraping-software?lang=en).
+The lexical score is a ranking aid only. Dates from the public cards are shown when
+valid; otherwise the UI shows the observation date, without calling it a posting date.
 
-## Limits and failure behavior
+## Bounded source behavior
 
-- **1–8 queries** per run, one results page per query, **at most 30 cards** per page.
-  The generated domain/area combinations may yield fewer queries than the budget.
-- At least 1.8 seconds between query pages. Up to 60 DOM observations per page,
-  with 500 ms polling; individual Chrome operations and catalog callbacks time out.
-- Two consecutive matching snapshots are required for a results batch.
-- Consent, sign-in, CAPTCHA, unusual traffic, visible access denial/rate limiting,
-  an unrecognized page, a closed tab or changed navigation ends the run. No bypass,
-  stealth, cookie handling, alternate endpoint or automatic retry is attempted.
-- Collector execution is top-frame/document-bound; the in-page function validates
-  the Google host, HTTPS search path and expected query **before reading the DOM**.
-- Unsafe schemes, userinfo, obvious private/local hosts, IP literals and unusual ports
-  are rejected. Host validation is syntactic, **not DNS-based proof of a public host**.
-  The server never fetches result URLs, and only explicit clicks open results.
-- Autofill and discovery cannot start simultaneously from the same panel.
-- Up to **3,000 jobs / 32 MiB** in the private catalog; bounded import/text/alias sizes.
-  A malformed or unsupported catalog fails with HTTP 409 rather than being replaced.
-- Google markup, availability, ranking and regional behavior vary. A ready page is
-  not proof that every result was collected. Search position and the keyword score
-  do not establish eligibility, an open vacancy, remote permission or hiring intent.
+### Google
 
-## Local data and deduplication
+- One newly created inactive tab, owned by the current run; left open for inspection.
+- At most 30 cards per page, one page per generated query, no automatic result visits.
+- At least 1.8 seconds between query pages; bounded readiness observations and calls.
+- The host, path, query and document identity are checked before DOM reading. Two
+  stable result snapshots are required before import.
+- Consent, sign-in, CAPTCHA, unusual traffic, denial, navigation, tab closure or
+  unrecognized markup stops the run. No bypass or automatic resume.
 
-`data/search/discovery.json` is separate from applications and the CSV journal. It
-stores schema version 1, saved settings, canonical URLs/aliases, original result or
-manual text, source labels, observed query strings, first/last seen times and one of
-`new`, `saved`, `hidden`. It is ignored by Git. No search history is sent to pi.
+### Experimental public LinkedIn
 
-Common tracking parameters/fragments are removed. LinkedIn job IDs and recognizable
-Workday requisitions provide stable identities; generic paths and IDs retain case.
-Similar titles alone never merge jobs. A manual LinkedIn/employer pair can join
-previously separate rows, including transitive alias connections. Up to 20 aliases
-are retained; an excessive merge is rejected without a partial write.
+- One fixed HTTPS endpoint:
+  `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search`.
+- **Anonymous GET only**, credentials omitted, no browser/session attachment, no
+  caller-supplied target or authentication headers, no redirects, retries, detail
+  crawling, login refresh or pagination (`start=0`). An identifying ApplyPilot user
+  agent is used; no fingerprint spoofing or proxy rotation.
+- One request at a time; 2.5-second server minimum between starts, 2.6-second panel
+  delay between completed requests; 15-second deadline; 512 KiB decoded-body limit.
+- HTML is parsed inertly with pinned `parse5@8.0.0`, not loaded into a browser or
+  injected into the panel. At most 25 validated, deduplicated cards per response.
+- IDs must match canonical LinkedIn job links. Title, company, location and date
+  are plain text; scripts, markup and credentials are not retained.
+- Access denials, redirects, 429/999 and recognized challenges stop immediately.
+  A minimum five-minute pause applies, extended by a longer `Retry-After` header.
+  There is **no scheduled retry**. Restarting a stopped run is a separate user action.
+- Changed/unrecognized responses fail without inventing cards. API replies contain
+  bounded status/time/size/hash evidence, not raw HTML.
 
-Manually supplied, nonempty fields are protected from later Google text. A later
-manual import can revise them. When separate rows merge, **hidden wins over saved,
-which wins over new**. Queries are bounded to 12 per job. Atomic writes replace the
-catalog only after validation of the complete incoming batch.
+**Live evidence is mixed:** the initial anonymous probe returned HTTP 200 and ten
+individual links. A later connector validation returned HTTP 429 and was stopped.
+Structured parsing and the integrated UI have been verified with synthetic fixtures,
+not with a successful subsequent live connector run. Do not infer production readiness.
 
-Existing applications are associated by canonical posting URLs at read time. A
-catalog entry can display **Resume application** for a matching tracker record.
-Changing or deleting that discovery does not alter the application. URL matching
-is deliberately conservative and will not recognize every employer's aliases.
+LinkedIn's [agreement](https://www.linkedin.com/legal/user-agreement) and
+[automation restrictions](https://www.linkedin.com/help/linkedin/answer/a1341387/prohibition-of-scraping-software?lang=en)
+remain relevant. A public response or logged-in session is not blanket authorization.
+No authenticated internal API, official partner access or account automation is included.
 
-## API contract
+## Manual import and browser boundary
 
-The local API retains the existing localhost Host/Origin protection. No endpoint
-below fetches a website, invokes pi, creates an application or submits a form.
+**Manual import / External browsing** provides prepared LinkedIn browser searches and
+URL imports. These are separate from the public connector. Paste one link per line,
+at most 50, optionally preceded by a title. Single-link details can include company,
+location, an employer alias and manually copied text. Neither linked page is fetched.
 
-| Method | Route | Request / behavior |
+Google/LinkedIn browser pages, including their embedded frames, remain excluded from
+general extraction and autofill. Imported descriptions retain their original language.
+The server never fetches arbitrary imported/result URLs. Syntactic host filtering is
+not DNS-based proof that a hostname is public; only explicit clicks open these URLs.
+
+## Private persistence and compatibility
+
+`data/search/discovery.json` is independent of applications and the CSV journal and
+is ignored by Git. Schema 2 adds the `linkedin-public` source and optional posting
+date. Reads accept schemas 1 and 2 and do not write or migrate anything.
+
+**Before the first schema-1 mutation**, the exact original bytes are saved in
+`data/backups/search/discovery-v1-*.json`. The successful mutation writes schema 2
+atomically. Old 0.5.0 readers reject schema 2; rolling back requires restoring the
+appropriate private v1 backup while the server is stopped, rather than relabelling
+new data as v1. Keep newer discoveries separately if rolling back.
+
+Bounds remain 3,000 jobs / 32 MiB, 20 aliases and 12 query strings per job. Corrupt
+or unsupported catalogs return 409 and are not replaced. Entire batches are validated
+before a catalog write. Similar titles do not establish identity; canonical URLs,
+LinkedIn IDs, recognizable Workday requisitions and explicit aliases do.
+
+Manual nonempty fields override automated fields, including direct public LinkedIn
+cards. Transitive merges retain aliases/provenance and the most restrictive discovery
+state: hidden > saved > new. Existing applications are associated at read time; no
+catalog mutation changes or deletes one.
+
+## Local API
+
+All routes retain localhost Host/Origin protection. **Only `/search/linkedin` below
+performs a remote request**, and only to its fixed public endpoint. None invokes pi,
+creates an application or submits a form.
+
+| Method | Route | Behavior |
 |---|---|---|
-| GET | `/search` | Settings and ranked jobs, with optional existing-application association |
-| PUT | `/search/settings` | Validated search settings; unspecified fields retain their defaults/current values |
-| POST | `/search/results` | `{items:[{url,title,snippet,query}]}`; 1–100 items, source forced to `google` |
-| POST | `/search/import` | `{links,details?}`; one link per line, optional single-job manual details |
+| GET | `/search` | Settings, ranked jobs, derived link quality/platform/provenance, optional application association |
+| PUT | `/search/settings` | Validate and persist editable search settings |
+| POST | `/search/results` | `{items}`; 1–100 Google results, source forced to `google` |
+| POST | `/search/linkedin` | `{settings,index,acknowledgeExperimental:true}`; one public page, validated import, evidence and fresh catalog |
+| POST | `/search/import` | `{links,details?}`; manual links and optional single-job details |
 | PATCH | `/search/jobs/:id` | `{status:"new"\|"saved"\|"hidden"}` only |
-| DELETE | `/search/jobs/:id` | Remove the discovery, never the application |
+| DELETE | `/search/jobs/:id` | Delete a discovery only |
 
-Settings: `{keywords, categories:["ai","dev","data","consulting"],
-scope:"montreal_remote"|"quebec"|"canada", term, maxPages}`. `maxPages` is a query
-budget, not a promise of result pagination. Mutation responses include a fresh
-catalog; import/result responses also include `added`, `updated`, `merged` counts
-for that batch. Unknown IDs return 404; invalid input/limits return 400.
+Settings: `{keywords,categories,scope,term,maxPages}`. Categories are `ai`, `dev`,
+`data`, `consulting`; scopes are `montreal_remote`, `quebec`, `canada`. The public
+request index must be inside the generated plan. Disconnecting its HTTP request
+aborts the upstream operation; already accepted local batches are not rolled back.
 
-## Privacy and verification
+## Privacy and tests
 
-Queries go to **Google**; clicking prepared LinkedIn searches sends those terms to
-**LinkedIn**. Search does not call a model and does not include profile contact
-information, CVs, GPA or unconfirmed language levels. As with ordinary navigation,
-Chrome and the destination may use the current browser session. ApplyPilot neither
-reads nor exports its credentials. Avoid placing private data in custom keywords,
-URLs or manually pasted descriptions.
+Search sends chosen query terms, never CVs, contact fields, GPA or unconfirmed
+language levels. Do not put private information in custom terms or pasted URLs.
+Google/manual browsing may use an existing browser session, but the server-side
+LinkedIn connector does not read, export or use it.
 
-Tests cover pure helpers, catalog corruption/capacity/merges, HTTP security and
-separation, runner cancellation/navigation, real Chrome parsing of synthetic pages,
-and the actual extension UI. In discovery E2E tests, every new tab is held at
-`about:blank` until interception is installed: all destination pages are fulfilled
-locally. Public screenshots contain fictional jobs. **These tests do not establish
-successful collection against live Google or any live employer.**
+Tests use fictional candidates and local HTTP/Chrome fixtures. The server's fetch
+is replaced **only in an explicitly marked isolated test process**. New browser tabs
+are intercepted before navigation. Tests cover classification, provenance, migration
+backups, corruption/capacity, cancellation, cooldown, failures, exclusion boundaries,
+320px layout and unchanged applications/forms. Screenshots are fixtures, not proof
+of live relevance or permission to automate a third-party site.
