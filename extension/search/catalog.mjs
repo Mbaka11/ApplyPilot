@@ -29,6 +29,23 @@ export function catalogMeta(job) {
   const preferredUrl = job.employerUrl && classifyJobLink(job.employerUrl).kind !== 'listing' ? job.employerUrl : links.find((link, index) => classes[index].kind === 'job') || job.url;
   return { kind, preferredUrl, platforms: [...new Set(classes.map(c => c.platform))], discoveryMethods: [...new Set((job.sources || []).map(s => s === 'google' ? 'google' : s === 'linkedin-public' ? 'linkedin-public' : 'manual'))], evidence: kind === 'job' ? 'url-pattern' : 'unrecognized' };
 }
+// Preserve the server's relevance order for ties and never use discovery dates as publication dates.
+export function sortCatalog(jobs, order = 'relevance') {
+  const rows = [...jobs];
+  if (!['published-desc', 'published-asc'].includes(order)) return rows;
+  const publication = job => {
+    const value = job.postedAt;
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const time = Date.parse(value);
+    return Number.isFinite(time) && new Date(time).toISOString().startsWith(value) ? time : null;
+  };
+  return rows.sort((a, b) => {
+    const left = publication(a), right = publication(b);
+    if (left === null) return right === null ? 0 : 1;
+    if (right === null) return -1;
+    return order === 'published-asc' ? left - right : right - left;
+  });
+}
 export function filterCatalog(jobs, { status = 'visible', kind = 'job', platform = 'all', source = 'all', text = '' } = {}) {
   const needle = normal(text);
   return jobs.filter(job => {

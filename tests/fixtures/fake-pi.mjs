@@ -23,14 +23,22 @@ if (dir) {
     isolated: ['PI_SESSION_ID', 'PI_SESSION_FILE', 'PI_PROVIDER', 'PI_MODEL'].every((key) => !process.env[key]),
     flags: process.argv.slice(2),
     instructionsSeen: input.includes('SYNTHETIC_INSTRUCTION_CANARY'),
+    letterRequest: input.startsWith('Tu es un rédacteur expert'),
   }));
 }
 if (settings.mode === 'json' || (settings.mode === 'retry' && input.includes('\n\nIMPORTANT :'))) {
   output(JSON.stringify({ answers: {} }));
 } else if (settings.mode === 'invalid' || settings.mode === 'retry') {
   output('not JSON');
+} else if (input.startsWith('Tu adaptes la section')) {
+  let delay = 0;
+  try { delay = Math.max(0, Math.min(10000, JSON.parse(fs.readFileSync(dir + '-tailor-delay.json', 'utf8')).delay)); } catch { /* no delay */ }
+  await new Promise(resolve => setTimeout(resolve, delay));
+  output(fs.readFileSync(dir + '-tailor.json', 'utf8'));
 } else if (input.startsWith('Tu es un rédacteur expert')) {
-  await new Promise(resolve => setTimeout(resolve, 500));
+  let delay = 500;
+  try { delay = Math.max(0, Math.min(10000, JSON.parse(fs.readFileSync(dir + '-letter-delay.json', 'utf8')).delay)); } catch { /* normal fixture delay */ }
+  await new Promise(resolve => setTimeout(resolve, delay));
   output(JSON.stringify({ language: 'en', company: 'Nordic Analytics', jobTitle: 'Machine Learning Intern', subject: 'Machine Learning Internship',
     body: 'Dear Hiring Team,\n\nI would like to contribute to the machine learning internship at Nordic Analytics. My academic projects and internship experience have given me practical experience with Python, SQL and model evaluation.\n\nI value clear experiments, reliable data and useful documentation. I would welcome the opportunity to discuss the team’s needs and the contributions I could make.\n\nThank you for considering my application.\n\nSincerely,', warnings: [] }));
 } else {

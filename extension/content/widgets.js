@@ -145,6 +145,16 @@
     const items = d.radios.map((r) => ({ el: r, text: AP.optionLabel(r) }));
     const { option, score } = AP.bestMatch(items, wantsOf(result), (o) => o.text);
     if (!option || score < MIN_SCORE) return { status: 'fail', note: 'Aucune option correspondante', options: items.map((i) => i.text) };
+    if (d.ariaRadio) {
+      d.checkpoint?.();
+      if (option.el.getAttribute('aria-checked') !== 'true') AP.click(option.el);
+      await AP.sleep(180); d.checkpoint?.();
+      AP.blur(option.el);
+      await AP.sleep(180); d.checkpoint?.();
+      const current = option.el.id ? document.getElementById(option.el.id) : option.el.isConnected ? option.el : null;
+      const selected = current?.getAttribute('aria-checked') === 'true';
+      return { status: selected ? 'ok' : 'check', value: selected ? option.text : '', note: selected ? '' : 'Le site n’a pas conservé la sélection : choisis la réponse manuellement.' };
+    }
     const ok = await toggle(option.el, true, d.checkpoint);
     return { status: ok ? 'ok' : 'fail', value: option.text };
   }
@@ -504,7 +514,7 @@
       case 'prompt':
         return fillPrompt(d, result);
       case 'combobox':
-        return fillCombobox(d, result);
+        return ctx?.platform === 'successfactors' && AP.successfactors ? AP.successfactors.fillCombobox(d, result, ctx) : fillCombobox(d, result);
       case 'file':
         return fillFile(d, result);
       default:

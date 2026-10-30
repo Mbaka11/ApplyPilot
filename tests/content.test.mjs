@@ -9,7 +9,7 @@ import { launchBrowser } from '../server/src/pdf.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIX = path.join(ROOT, 'tests', 'fixtures');
 const OUT = path.join(ROOT, 'tests', 'output');
-const CONTENT = ['../i18n.js', 'dom.js', 'extract.js', 'fields.js', 'widgets.js', 'mapping.js', 'workday.js', 'main.js'].map((f) =>
+const CONTENT = ['../i18n.js', 'dom.js', 'extract.js', 'fields.js', 'widgets.js', 'mapping.js', 'workday.js', 'successfactors.js', 'successfactors-documents.js', 'main.js'].map((f) =>
   path.join(ROOT, 'extension', 'content', f),
 );
 
@@ -258,8 +258,10 @@ async function main() {
     const staleStep = await run(page, 'fillValues', { ...strictPayload, runId: 'late-old-step', expectedPage: scope.pageIdentity, answers: { [cityId]: { value: 'Wrong city', confidence: 1 } } });
     check('same URL, different Workday step rejects old AI answers', staleStep.cancelled === true && (await val(page, '#home-city')) === cityBefore);
     const nextScope = await run(page, 'detect');
-    const resumedFill = await run(page, 'fillValues', { ...strictPayload, runId: 'new-step', expectedPage: nextScope.pageIdentity, answers: { [cityId]: { value: 'Ottawa', confidence: 1 } } });
-    check('a new run on the next step is not blocked by an earlier cancellation', !resumedFill.cancelled && (await val(page, '#home-city')) === 'Ottawa');
+    const preservedFill = await run(page, 'fillValues', { ...strictPayload, runId: 'new-step-preserved', expectedPage: nextScope.pageIdentity, answers: { [cityId]: { value: 'Ottawa', confidence: 1 } } });
+    check('a fresh AI response preserves an existing field unless overwrite was explicitly selected', !preservedFill.cancelled && (await val(page, '#home-city')) === cityBefore);
+    const resumedFill = await run(page, 'fillValues', { ...strictPayload, options: { ...strictPayload.options, overwrite: true }, runId: 'new-step', expectedPage: nextScope.pageIdentity, answers: { [cityId]: { value: 'Ottawa', confidence: 1 } } });
+    check('a new run with explicit overwrite is not blocked by an earlier cancellation', !resumedFill.cancelled && (await val(page, '#home-city')) === 'Ottawa');
 
     console.log('Workday — Langues et sites Web (page en arrière-plan, listes Canvas Kit)');
     await load(page, 'workday-langues.html');

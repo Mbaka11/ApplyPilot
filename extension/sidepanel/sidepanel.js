@@ -4,6 +4,9 @@ import { chooseLanguage, translate } from './i18n.mjs';
 import { createSearchPanel } from '../search/panel.mjs';
 import { isDiscoveryPage, isLinkedIn } from '../search/core.mjs';
 import { catalogMeta } from '../search/catalog.mjs';
+import { createCvInspector } from './cv-inspector.mjs';
+import { createCvTailor } from './cv-tailor.mjs';
+import { createFormDiagnostic, downloadFormDiagnostic } from './form-diagnostic.mjs';
 const CONTENT_FILES = [
   'i18n.js',
   'content/dom.js',
@@ -12,6 +15,8 @@ const CONTENT_FILES = [
   'content/widgets.js',
   'content/mapping.js',
   'content/workday.js',
+  'content/successfactors.js',
+  'content/successfactors-documents.js',
   'content/main.js',
 ];
 const VERSION = chrome.runtime.getManifest().version;
@@ -55,11 +60,13 @@ const S = {
   draft: null,
   draftDirty: false,
   appBusy: false,
+  cvBusy: false,
   switching: false,
   searchSummary: null,
   letterGeneration: null,
   page: null,
   pageError: '',
+  diagnosticBusy: false,
   prefs: { useAi: true, overwrite: false, addEntries: true, letterLang: 'auto' },
   letterBusy: false,
   letterT0: 0,
@@ -82,6 +89,18 @@ const esc = (s) =>
 const tr = (source, values = {}) => translate(source, S.uiLanguage, values);
 const statusLabel = (status) => tr(STATUS_LABEL[status] || status);
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString(S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+
+const otherCvBusy = () => !S.health || S.cvBusy || S.appBusy || S.switching || S.fillBusy || S.letterBusy;
+const cvSelectionLocked = () => otherCvBusy() || cvTailor.busy();
+const cvInspector = createCvInspector({ api, tr, esc, toast, canAct: () => !cvSelectionLocked(), locale: () => S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA' });
+const cvTailor = createCvTailor({ api, tr, esc, toast, canAct: () => !otherCvBusy() && !S.fillRun, locale: () => S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA',
+  onChange: application => { if (S.app?.id !== application.id) return; S.app = application; renderAppCard(); loadApps().catch(() => {}); } });
+function syncCvControls() {
+  const locked = cvSelectionLocked();
+  if ($('#cvSelect')) $('#cvSelect').disabled = locked;
+  cvInspector.setDisabled(locked);
+  cvTailor.setDisabled(otherCvBusy() || !!S.fillRun);
+}
 
 const searchPanel = createSearchPanel({ element: $('#tab-search'), stopButton: $('#headerSearchStop'), api, tr, esc, fmtDate, toast,
   canStart: () => !S.fillBusy,
@@ -170,6 +189,7 @@ async function checkServer() {
   renderShell();
   renderStatus();
   renderHome();
+  cvTailor.refresh();
 }
 
 async function loadApps() {
@@ -209,10 +229,11 @@ async function runInTab(cmd, payload = {}, { tabId } = {}) {
     target: { tabId: tab.id, allFrames: true },
     func: async () => {
       if (/(^|\.)linkedin\.com\.?$|(^|\.)google\.(com|ca|fr|co\.uk)\.?$/.test(location.hostname)) return null;
-      return { version: (await globalThis.__applyPilot?.run('ping', {}))?.version || '' };
+      const reply = await globalThis.__applyPilot?.run('ping', {});
+      return { version: reply?.version || '', successfactorsRevision: reply?.successfactorsRevision || 0 };
     },
   });
-  const outdated = probes.filter(frame => frame.result && frame.result.version !== VERSION);
+  const outdated = probes.filter(frame => frame.result && (frame.result.version !== VERSION || frame.result.successfactorsRevision !== 2));
   if (outdated.length) {
     const documentIds = outdated.map(frame => frame.documentId);
     if (documentIds.some(id => !id)) throw new Error('Impossible d’accéder à la page : ferme et rouvre le panneau, puis réessaie sans recharger ton formulaire.');
@@ -252,6 +273,7 @@ async function refreshPage() {
       platform: frames.find((f) => f.platform !== 'generic')?.platform || top.platform,
       fieldCount: frames.reduce((n, f) => n + (f.fieldCount || 0), 0),
       fileCount: frames.reduce((n, f) => n + (f.fileCount || 0), 0),
+      manualActionCount: frames.reduce((n, f) => n + (f.manualActionCount || 0), 0),
       step: frames.find((f) => f.step)?.step || null,
     };
     S.pageError = '';
@@ -269,20 +291,40 @@ async function refreshPage() {
   renderHome();
 }
 
+// Explicit local export; no server, provider, answer memory or content-script reinjection.
+async function exportFormDiagnostic() {
+  if (S.diagnosticBusy || S.fillBusy) throw new Error('Attends la fin du remplissage ou du diagnostic.');
+  const tab = await activeTab();
+  if (!tab || !scriptable(tab.url)) throw new Error('Ouvre une offre ou un formulaire de candidature (page web).');
+  S.diagnosticBusy = true;
+  renderPage(); renderFill();
+  try {
+    const json = await createFormDiagnostic({ tabId: tab.id, version: VERSION, isCurrent: async () => {
+      const current = await activeTab();
+      return !S.fillBusy && current?.id === tab.id && current?.url === tab.url;
+    } });
+    downloadFormDiagnostic(json);
+    toast('Téléchargement du diagnostic demandé. Vérifie le fichier avant de le partager.');
+  } finally {
+    S.diagnosticBusy = false;
+    renderPage(); renderFill();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Candidatures
 // ---------------------------------------------------------------------------
 const hasLetterDraft = () => S.draftDirty || S.letterInstructions !== (S.app?.letter?.instructions || '');
 function confirmApplicationSwitch() {
-  if (S.letterBusy || S.appBusy || S.switching) throw new Error('Attends la fin de l’opération sur cette candidature.');
+  if (S.letterBusy || S.appBusy || S.cvBusy || S.switching || S.fillRun?.documents || cvTailor.busy()) throw new Error('Attends la fin de l’opération sur cette candidature.');
   return !hasLetterDraft() || confirm(tr('Changer de candidature et abandonner le brouillon de lettre non enregistré ?'));
 }
 async function activateApplication(id) {
   if (id === S.app?.id) return switchTab('app');
   if (!confirmApplicationSwitch()) return;
-  S.switching = true;
+  S.switching = true; syncCvControls();
   try { await setActiveApp(id); switchTab(id ? 'app' : 'home'); }
-  finally { S.switching = false; }
+  finally { S.switching = false; syncCvControls(); }
 }
 async function setActiveApp(id, { quiet = false } = {}) {
   if (S.fillRun) stopFill();
@@ -328,7 +370,7 @@ async function analyze() {
   renderAppCard();
   switchTab('app');
   toast(existed ? 'Offre déjà connue : candidature reprise' : 'Offre analysée ✓');
-  } finally { S.appBusy = false; }
+  } finally { S.appBusy = false; syncCvControls(); }
 }
 
 async function patchApp(body) {
@@ -338,12 +380,26 @@ async function patchApp(body) {
   return application;
 }
 
+async function selectCv(id) {
+  if (!S.app || cvSelectionLocked()) return renderAppCard();
+  const appId = S.app.id;
+  if (!S.cvs.some(cv => cv.id === id)) throw new Error('Le CV sélectionné est introuvable. Actualise la liste des CV.');
+  S.cvBusy = true; syncCvControls();
+  try {
+    const { application } = await api(`/applications/${encodeURIComponent(appId)}`, { method: 'PATCH', body: { cvId: id } });
+    if (S.app?.id !== appId) return;
+    S.app = application;
+    await loadApps();
+    toast('CV choisi ✓');
+  } finally { S.cvBusy = false; renderAppCard(); }
+}
+
 // ---------------------------------------------------------------------------
 // Lettre
 // ---------------------------------------------------------------------------
 let tickTimer = null;
 async function generateLetter() {
-  if (!S.app || S.letterBusy || S.appBusy) return;
+  if (!S.app || S.letterBusy || S.appBusy || S.cvBusy || S.switching || S.fillBusy) return;
   if (S.draftDirty && !confirm(tr('Régénérer la lettre et remplacer le brouillon non enregistré ?'))) return;
   const appId = S.app.id, instructions = S.letterInstructions;
   S.letterGeneration = S.health?.generation?.letter || null;
@@ -377,8 +433,8 @@ async function generateLetter() {
 }
 
 async function saveLetter() {
-  if (!S.app || !S.draft || S.appBusy || S.letterBusy) return;
-  S.appBusy = true;
+  if (!S.app || !S.draft || S.appBusy || S.letterBusy || S.cvBusy || S.switching || S.fillRun?.documents) return;
+  S.appBusy = true; syncCvControls();
   const savedDraft = { ...S.draft };
   try {
   const { application } = await api(`/applications/${encodeURIComponent(S.app.id)}/letter`, {
@@ -389,7 +445,7 @@ async function saveLetter() {
   S.draftDirty = S.draft.subject !== savedDraft.subject || S.draft.body !== savedDraft.body;
   renderLetter();
   toast('PDF mis à jour ✓');
-  } finally { S.appBusy = false; }
+  } finally { S.appBusy = false; syncCvControls(); }
 }
 
 function letterUrl() {
@@ -420,9 +476,10 @@ function stopFill({ pageChanged = false, timedOut = false } = {}) {
   S.fillPhase = '';
   if (pageChanged) S.fill = null;
   renderFill();
+  if (run.documents) renderLetter();
   toast(timedOut ? 'pi met trop de temps : remplissage arrêté. Réessaie ou désactive l’IA.' : pageChanged
     ? 'Étape changée : ancien remplissage arrêté. Tu peux remplir cette page.'
-    : 'Remplissage arrêté. Les champs déjà remplis sont conservés.');
+    : run.documents ? 'Préparation arrêtée. Les fichiers déjà transmis restent sur le site.' : 'Remplissage arrêté. Les champs déjà remplis sont conservés.');
 }
 
 async function execFill(run, cmd, payload) {
@@ -440,8 +497,93 @@ async function execFill(run, cmd, payload) {
   return frames;
 }
 
+// A separate explicit action: preparing documents may consume provider quota and send PDFs to the employer.
+/** The adapted copy replaces the base PDF only when the user opted in for this application and it is still current. */
+async function cvFile(app, request) {
+  if (!app.cvTailored?.useForForms) return request(`/cvs/${encodeURIComponent(app.cvId)}/pdf?base64=1`);
+  const { tailoredCv } = await request(`/applications/${encodeURIComponent(app.id)}/cv-tailored`);
+  if (tailoredCv.stale.baseChanged || tailoredCv.stale.jobChanged || tailoredCv.stale.cvChanged) throw new Error('Le CV adapté est périmé : régénère-le ou désactive son utilisation.');
+  return request(`/applications/${encodeURIComponent(app.id)}/cv-tailored.pdf?base64=1`);
+}
+
+async function prepareAndAttachDocuments() {
+  if (S.fillRun || S.diagnosticBusy || S.cvBusy || S.appBusy || S.switching || S.letterBusy || searchPanel.running) return toast('Attends la fin de l’opération sur cette candidature.', 'error');
+  if (S.health?.features?.documentPreparation !== 1) return toast('Redémarre le serveur ApplyPilot pour activer les documents automatiques.', 'error');
+  const selected = S.cvs.find(cv => cv.id === S.app?.cvId);
+  if (!S.app || !selected || !S.app.job?.title || !S.app.job?.company || !(Number(S.app.job.descriptionLength) >= 100) || S.app.status === 'soumise') return toast('Analyse l’offre et sélectionne son CV avant la préparation automatique.', 'error');
+  if (S.draftDirty) return toast('Enregistre ton brouillon de lettre avant de joindre les documents.', 'error');
+  const appId = S.app.id, cvId = S.app.cvId, server = S.server, instructions = S.letterInstructions;
+  const tab = await activeTab();
+  if (S.fillRun || S.diagnosticBusy || S.app?.id !== appId || S.app?.cvId !== cvId || S.server !== server || S.draftDirty) return;
+  if (!tab || !scriptable(tab.url) || S.page?.platform !== 'successfactors') return toast('Documents automatiques disponibles uniquement sur la page principale SuccessFactors.', 'error');
+  if (!confirm(tr('Joindre le CV « {cv} » et la lettre pour « {title} » — {company} à la page {host} ?\nUne lettre absente sera générée avec pi (quota habituel). La lettre existante sera conservée. Rien ne sera soumis. Arrêter ne retire pas les fichiers déjà transmis.', { cv: S.app.cvTailored?.useForForms ? tr('{name} (adapté à l’offre)', { name: selected.name }) : selected.name, title: S.app.job.title, company: S.app.job.company, host: new URL(tab.url).hostname }))) return;
+  const run = { id: crypto.randomUUID(), controller: new AbortController(), tabId: tab.id, pages: null, documents: true };
+  let draftState = JSON.stringify(S.draft);
+  const guard = () => {
+    assertFill(run);
+    if (S.server !== server || S.app?.id !== appId || S.app?.cvId !== cvId || S.app?.status === 'soumise' || JSON.stringify(S.draft) !== draftState || S.letterInstructions !== instructions) throw new Error('Candidature ou brouillon modifié : documents arrêtés.');
+  };
+  const request = (path, options = {}) => { guard(); return api(path, { ...options, signal: run.controller.signal }); };
+  const phase = text => { guard(); S.fillPhase = text; renderFill(); };
+  S.fillRun = run; S.fillBusy = true; S.fillPhase = 'Vérification des zones CV et lettre…';
+  S.fill = { results: [], info: {}, at: Date.now(), noCv: false };
+  renderFill(); renderLetter();
+  try {
+    const pages = await runInTab('detect', {}, { tabId: tab.id }); guard();
+    const top = pages.find(page => page.isTop && page.platform === 'successfactors');
+    if (!top || top.url !== tab.url) throw new Error('Documents automatiques disponibles uniquement sur la page principale SuccessFactors.');
+    run.pages = [top];
+    const { application: fresh } = await request(`/applications/${encodeURIComponent(appId)}`); guard();
+    if (fresh.cvId !== cvId || fresh.status === 'soumise' || fresh.job.title !== S.app.job.title || fresh.job.company !== S.app.job.company || JSON.stringify(fresh.letter) !== JSON.stringify(S.app.letter) || !!fresh.cvTailored?.useForForms !== !!S.app.cvTailored?.useForForms || fresh.cvTailored?.createdAt !== S.app.cvTailored?.createdAt) throw new Error('Candidature ou brouillon modifié : documents arrêtés.');
+    if (fresh.letter?.cvId && fresh.letter.cvId !== cvId) throw new Error('La lettre correspond à un autre CV : révise-la avant de la joindre.');
+    const cvSource = await request(`/cvs/${encodeURIComponent(cvId)}/details`); guard();
+    const files = { cv: await cvFile(fresh, request) }; guard();
+    const checkCvSource = async () => {
+      const current = await request(`/cvs/${encodeURIComponent(cvId)}/details`); guard();
+      if (current.modifiedAt !== cvSource.modifiedAt || current.size !== cvSource.size || current.pdfPath !== cvSource.pdfPath) throw new Error('Le fichier CV a changé pendant la préparation : aucun autre document envoyé.');
+    };
+    const [plan] = await execFill(run, 'sfDocumentPlan', { documentNames: { cv: files.cv.name, letter: fresh.letter?.fileName || '' } }); guard();
+    if (Object.values(plan.present).includes('other')) throw new Error('Une pièce est déjà présente dans cette zone : aucun remplacement automatique.');
+    if (!fresh.letter?.fileName) {
+      const settings = await request('/generation'); guard();
+      S.health.generation = settings; renderLetter();
+      phase('Génération de la lettre et du PDF…');
+      const { application } = await request(`/applications/${encodeURIComponent(appId)}/letter`, { method: 'POST', body: { onlyIfMissing: true, cvId, language: S.prefs.letterLang, instructions, uiLanguage: S.uiLanguage } }); guard();
+      if (application.cvId !== cvId || application.letter?.cvId && application.letter.cvId !== cvId) throw new Error('La lettre correspond à un autre CV : révise-la avant de la joindre.');
+      S.app = application;
+      S.draft = { subject: application.letter.subject, body: application.letter.body }; S.draftDirty = false;
+      draftState = JSON.stringify(S.draft);
+      await loadApps(); guard();
+    }
+    files.letter = await request(`/applications/${encodeURIComponent(appId)}/letter.pdf?base64=1`); guard();
+    const expectedLetter = JSON.stringify(S.app.letter);
+    for (const documentKind of ['cv', 'letter']) {
+      await checkCvSource(); guard();
+      const { application } = await request(`/applications/${encodeURIComponent(appId)}`); guard();
+      if (application.cvId !== cvId || application.status === 'soumise' || JSON.stringify(application.letter) !== expectedLetter) throw new Error('Candidature ou brouillon modifié : documents arrêtés.');
+      if (!!application.cvTailored?.useForForms !== !!fresh.cvTailored?.useForForms || application.cvTailored?.createdAt !== fresh.cvTailored?.createdAt) throw new Error('Le CV adapté a changé pendant la préparation : aucun autre document envoyé.');
+      phase(documentKind === 'cv' ? 'Téléversement du CV…' : 'Téléversement de la lettre PDF…');
+      const [outcome] = await execFill(run, 'sfAttachDocument', { ticket: plan.ticket, documentKind, file: files[documentKind] }); guard();
+      S.fill.results.push(outcome.result);
+      if (!outcome.completed) {
+        if (documentKind === 'cv') S.fill.results.push({ id: '', label: 'Lettre d’accompagnement', kind: 'manual-action', status: 'todo', note: 'Lettre non envoyée : vérifie le transfert du CV avant de relancer.' });
+        break;
+      }
+    }
+  } catch (error) {
+    if (S.fillRun === run && error.name !== 'AbortError') {
+      S.fill.results.push({ id: '', label: 'CV / lettre', kind: 'manual-action', status: 'todo', note: error.message });
+      toast(error.message, 'error');
+    }
+  } finally {
+    if (S.fillRun === run) { S.fillRun = null; S.fillBusy = false; S.fillPhase = ''; renderFill(); renderLetter(); renderAppCard(); }
+  }
+}
+
 async function fillPage() {
   if (S.fillRun) return;
+  if (S.diagnosticBusy) return toast('Attends la fin du remplissage ou du diagnostic.', 'error');
+  if (S.cvBusy || S.appBusy || S.switching || S.letterBusy) return toast('Attends la fin de l’opération sur cette candidature.', 'error');
   if (searchPanel.running) return toast('Arrête la recherche avant de lancer le remplissage.', 'error');
   if (!S.health) return toast('Serveur non connecté : lance start.cmd', 'error');
   const run = { id: crypto.randomUUID(), controller: new AbortController(), tabId: null, pages: null };
@@ -461,7 +603,7 @@ async function fillPage() {
     assertFill(run);
     const [{ profile }, memory] = await Promise.all([request('/profile'), request('/memory')]);
     const files = {};
-    if (S.app?.cvId) files.cv = await request(`/cvs/${encodeURIComponent(S.app.cvId)}/pdf?base64=1`);
+    if (S.app?.cvId) files.cv = await cvFile(S.app, request);
     if (S.app?.letter?.fileName) files.letter = await request(`/applications/${encodeURIComponent(S.app.id)}/letter.pdf?base64=1`);
     if (S.health?.documents?.transcript) files.transcript = await request('/documents/transcript?base64=1').catch(() => null);
     assertFill(run);
@@ -578,6 +720,7 @@ function renderHome() {
 }
 
 function renderStatus() {
+  syncCvControls();
   const el = $('#serverStatus');
   const off = $('#offline');
   if (S.health) {
@@ -610,14 +753,19 @@ function renderPage() {
     action = `<div class="stack"><div><span class="badge">${tr('Offre détectée')}</span></div>
       <h3>${esc(p.title || tr('Offre sans titre'))}</h3><div class="muted">${esc(p.company || '')}</div>
       <button class="btn primary big" data-action="analyze">${tr('Analyser cette offre')}</button></div>`;
-  } else if (p.fieldCount > 0) {
-    action = `<div class="small muted">${tr('Formulaire : {count} champ(s)', { count: p.fieldCount })}${p.fileCount ? tr(' + {count} fichier(s)', { count: p.fileCount }) : ''}${step}</div>`;
+  } else if (p.fieldCount > 0 || p.fileCount > 0 || p.manualActionCount > 0) {
+    action = `<div class="small muted">${tr('Formulaire : {count} champ(s)', { count: p.fieldCount })}${p.fileCount ? tr(' + {count} fichier(s)', { count: p.fileCount }) : ''}${p.manualActionCount ? tr(' + {count} action(s) manuelle(s)', { count: p.manualActionCount }) : ''}${step}</div>`;
   } else if (!p.isPosting) {
     action = `<div class="small muted">${tr('Aucune offre ni formulaire détecté ici.')}
       <button class="btn ghost" data-action="analyze">${tr('Analyser quand même')}</button></div>`;
   }
   el.innerHTML = `<h2><span>Page</span><span class="badge grey">${esc(tr(PLATFORM_LABEL[p.platform] || p.platform))}</span></h2>${action}
-    ${p.hasPassword ? `<div class="small muted">${tr('🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.')}</div>` : ''}`;
+    ${p.hasPassword ? `<div class="small muted">${tr('🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.')}</div>` : ''}
+    <details class="small" style="margin-top:8px"><summary>${tr('Diagnostic local du formulaire')}</summary>
+      <p class="muted">${tr('Exporte uniquement la structure, les catégories de libellés et les liens ARIA. Aucune réponse, pièce jointe, URL complète ou donnée de connexion. Aucun clic dans le formulaire, appel IA ou envoi au serveur.')}</p>
+      <p class="muted">${tr('Le fichier reste dans tes téléchargements. Les libellés libres et les identifiants sont remplacés par des catégories et références anonymes. Vérifie le rapport avant de le partager.')}</p>
+      <button type="button" class="btn" data-action="diagnostic" ${S.fillBusy || S.diagnosticBusy ? 'disabled' : ''}>${tr(S.diagnosticBusy ? 'Lecture de la structure…' : 'Exporter le diagnostic local')}</button>
+    </details>`;
 }
 
 /** Exigences repérées dans l'offre (pièces, conditions), comparées au profil. */
@@ -635,6 +783,7 @@ function requirementsHtml(reqs) {
 function renderAppCard() {
   const el = $('#appCard');
   if (!S.app) {
+    cvInspector.reset(); cvTailor.reset();
     const recent = S.apps.filter((a) => a.status === 'en cours').slice(0, 8);
     el.innerHTML = `<h2>${tr('Candidature active')}</h2>
       <div class="muted small">${tr('Aucune. Ouvre l’offre et clique « Analyser cette offre » : la candidature reste active pendant que tu remplis le formulaire.')}</div>
@@ -644,6 +793,7 @@ function renderAppCard() {
   }
   const a = S.app;
   const rec = S.recommendation;
+  const selectedCv = S.cvs.find(cv => cv.id === a.cvId);
   const cvOptions = S.cvs
     .map((c) => `<option value="${esc(c.id)}" ${c.id === a.cvId ? 'selected' : ''}>${esc(c.name)}${c.language ? ` (${c.language.toUpperCase()})` : ''}${rec?.cvId === c.id ? ' ★' : ''}</option>`)
     .join('');
@@ -653,7 +803,9 @@ function renderAppCard() {
     <div class="muted">${esc(a.job?.company || '')}${a.job?.location ? ` · ${esc(a.job.location)}` : ''}</div>
     <div class="stack" style="margin-top:10px">
       <div><label class="field" for="cvSelect">${tr('CV à joindre')} ${rec?.cvId ? `<span class="muted">${esc(tr('(★ recommandé : {reason})', { reason: tr(rec.reason || '') }))}</span>` : ''}</label>
-        <select id="cvSelect">${cvOptions || `<option value="">${tr('Aucun CV trouvé')}</option>`}</select></div>
+        <select id="cvSelect" ${cvSelectionLocked() ? 'disabled' : ''}>${!selectedCv && S.cvs.length ? `<option value="" selected disabled>${tr(a.cvId ? 'CV sélectionné introuvable' : 'Choisis un CV')}</option>` : ''}${cvOptions || `<option value="">${tr('Aucun CV trouvé')}</option>`}</select>
+        <div id="cvInspector"></div>
+        <div id="cvTailor" style="margin-top:10px"></div></div>
       ${a.job?.url && a.status !== 'soumise' ? `<button class="btn primary big" data-action="applyJob">${tr('Postuler / connexion')}</button><div class="small muted">${tr('Ouvre dans ce navigateur : une session Workday valide est réutilisée. Compte propre à chaque entreprise ; mots de passe gérés par Chrome.')}</div>` : ''}
       <div class="row">
         ${a.job?.url ? `<button class="btn ghost" data-action="openJob">${tr('Voir l’offre')}</button>` : ''}
@@ -661,6 +813,8 @@ function renderAppCard() {
         <button class="btn ghost" data-action="newApp" title="${tr('Désactiver (l’historique reste dans le Journal)')}">${tr('Quitter cette candidature')}</button>
       </div>
     </div>`;
+  cvInspector.mount({ element: $('#cvInspector'), server: S.server, applicationId: a.id, cvId: a.cvId || '', cv: selectedCv, available: !!selectedCv, disabled: cvSelectionLocked() });
+  cvTailor.mount({ element: $('#cvTailor'), server: S.server, applicationId: a.id, cvId: a.cvId || '', cv: selectedCv, application: a, health: S.health, available: !!selectedCv && !!a.job?.title, disabled: otherCvBusy() || !!S.fillRun });
 }
 
 function generationHtml(generation, observed = false) {
@@ -670,7 +824,12 @@ function generationHtml(generation, observed = false) {
 }
 
 function renderLetter() {
+  syncCvControls();
   const el = $('#letterCard');
+  if (S.fillRun?.documents) {
+    el.innerHTML = `<h2>${tr('Lettre')}</h2><div class="small muted">${tr('Préparation des documents en cours. Le brouillon existant est conservé.')}</div>${generationHtml(S.health?.generation?.letter)}`;
+    return;
+  }
   if (!S.app) {
     el.innerHTML = '';
     return;
@@ -716,6 +875,8 @@ const RES_GROUPS = [
 const groupOf = (r) => (r.status === 'fail' || r.status === 'unresolved' ? 'todo' : r.status === 'skip' ? 'check' : r.status);
 
 function renderFill() {
+  syncCvControls();
+  if ($('[data-action="diagnostic"]')) $('[data-action="diagnostic"]').disabled = S.fillBusy || S.diagnosticBusy;
   $('#headerStop').classList.toggle('hidden', !S.fillBusy);
   $('#headerStop').textContent = tr('Arrêter');
   const el = $('#fillCard');
@@ -764,7 +925,8 @@ function renderFill() {
   }
   const submitted = S.app?.status === 'soumise';
   el.innerHTML = `<h2>${tr('Remplissage')}</h2>
-    <button class="btn primary big" data-action="fill">${tr(S.fill ? 'Remplir à nouveau' : 'Remplir cette page')}</button>
+    <button class="btn primary big" data-action="fill" ${S.diagnosticBusy ? 'disabled' : ''}>${tr(S.fill ? 'Remplir à nouveau' : 'Remplir cette page')}</button>
+    ${S.page?.platform === 'successfactors' ? `<button type="button" class="btn big" data-action="prepareDocuments" ${S.diagnosticBusy ? 'disabled' : ''}>${tr('Préparer et joindre CV + lettre')}</button><div class="small muted">${tr('Génère la lettre manquante et son PDF, puis joint les documents sans soumettre. Aucun remplacement automatique.')}</div>` : ''}
     ${opts}${body}
     <div class="row" style="margin-top:10px">
       <button class="btn ghost" data-action="memorize" title="${tr('Retenir tes réponses aux questions de cette page pour les prochaines candidatures')}">${tr('Mémoriser mes réponses')}</button>
@@ -982,13 +1144,15 @@ const ACTIONS = {
   },
   newApp: () => activateApplication(null),
   fill: () => fillPage(),
+  prepareDocuments: () => prepareAndAttachDocuments(),
+  diagnostic: () => exportFormDiagnostic(),
   stopFill: () => stopFill(),
   memorize: () => captureMemory(),
   submitted: () => markSubmitted(),
   exportCsv: () => chrome.tabs.create({ url: `${S.server}/journal.csv` }),
   saveServer: async () => {
-    if (S.letterBusy || S.appBusy || S.switching) throw new Error('Attends la fin de l’opération sur cette candidature.');
-    searchPanel.reset();
+    if (S.letterBusy || S.appBusy || S.cvBusy || S.switching || S.fillRun?.documents || cvTailor.busy()) throw new Error('Attends la fin de l’opération sur cette candidature.');
+    searchPanel.reset(); cvInspector.reset(); cvTailor.reset();
     S.server = ($('#serverUrl').value || DEFAULT_SERVER).replace(/\/+$/, '');
     S.serverDraft = null;
     await chrome.storage.local.set({ serverUrl: S.server });
@@ -1062,8 +1226,7 @@ document.addEventListener('change', async (e) => {
     if (t.id === 'uiLanguage') {
       await setUiLanguage(t.value);
     } else if (t.id === 'cvSelect') {
-      await patchApp({ cvId: t.value });
-      toast('CV choisi ✓');
+      await selectCv(t.value);
     } else if (t.id === 'pickApp' && t.value) {
       await activateApplication(t.value);
     } else if (t.id === 'letterLang') {
@@ -1104,6 +1267,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === 'ap:memorySaved' && msg.added) toast(tr('{count} réponse(s) mémorisée(s) pour les prochaines fois', { count: msg.added }));
 });
 window.addEventListener('pagehide', () => {
+  cvInspector.reset();
   searchPanel.stop({ quiet: true });
   if (S.fillRun) {
     const run = S.fillRun;

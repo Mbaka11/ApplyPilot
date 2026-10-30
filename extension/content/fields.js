@@ -220,6 +220,7 @@
 
   function classify(el) {
     const tag = el.tagName;
+    if (tag !== 'INPUT' && el.getAttribute('role') === 'radio') return 'radio';
     if (tag === 'SELECT') return 'select';
     if (tag === 'TEXTAREA') return 'textarea';
     if (tag === 'BUTTON') return 'dropdown';
@@ -277,7 +278,7 @@
       case 'checkbox':
         return !!el.checked;
       case 'radio': {
-        const c = d.radios.find((r) => r.checked);
+        const c = d.radios.find((r) => r.tagName === 'INPUT' ? r.checked : r.getAttribute('aria-checked') === 'true');
         return c ? optionLabel(c) : '';
       }
       case 'checkboxes':
@@ -292,6 +293,8 @@
       }
       case 'prompt':
         return selectedPromptItems(d.container);
+      case 'combobox':
+        return PLACEHOLDER_RE.test(String(el.value || '').trim()) ? '' : el.value || '';
       case 'file': {
         const names = [...(el.files || [])].map((f) => f.name);
         return names;
@@ -330,6 +333,7 @@
       maxLength: el.maxLength > 0 ? el.maxLength : undefined,
       section: sectionFor(el),
       container: wd || el,
+      manualReason: AP.successfactors?.manualReason(el) || '',
     };
     return d;
   }
@@ -360,10 +364,11 @@
     d.label = groupLabel(inputs) || labelFor(inputs[0]);
     const opts = inputs.map(optionLabel);
     d.options = opts;
-    if (kind === 'radio') d.radios = inputs;
+    if (kind === 'radio') { d.radios = inputs; d.ariaRadio = inputs[0].tagName !== 'INPUT'; }
     else d.boxes = inputs;
     const group = inputs[0].closest('[role="radiogroup"], [role="group"], fieldset');
     d.container = workdayContainer(inputs[0]) || (group && group.contains(inputs[inputs.length - 1]) ? group : commonAncestor(inputs));
+    d.required ||= group?.getAttribute('aria-required') === 'true';
     return finish(d);
   }
 
@@ -400,7 +405,7 @@
     const out = [];
     const doneRadio = new Set();
     const doneDate = new Set();
-    const els = root.querySelectorAll('input, select, textarea, button[aria-haspopup="listbox"], [role="combobox"]:not(input):not(select)');
+    const els = root.querySelectorAll('input, select, textarea, button[aria-haspopup="listbox"], [role="combobox"]:not(input):not(select), [role="radio"]:not(input)');
     for (const el of els) {
       if (el.closest('[data-applypilot-ignore]')) continue;
       const kind = classify(el);
@@ -413,6 +418,17 @@
       if (el.type === 'search' && el.closest('header, nav, [role="search"]')) continue;
       if (kind !== 'file' && el.closest('header, nav, footer, [role="banner"], [role="navigation"], [role="search"], [role="contentinfo"]')) continue;
 
+      if (kind === 'radio' && el.tagName !== 'INPUT') {
+        const container = el.closest('[role="radiogroup"]');
+        if (!container || container.querySelector('input[type="radio"]')) continue;
+        const group = [...container.querySelectorAll('[role="radio"]')].filter(radio => radio.closest('[role="radiogroup"]') === container &&
+          AP.isVisible(radio) && !radio.matches(':disabled, [aria-disabled="true"]'));
+        const key = group.map(idFor).join(',');
+        if (!group.length || doneRadio.has(key)) continue;
+        doneRadio.add(key);
+        out.push(describeGroup(group, 'radio'));
+        continue;
+      }
       if (kind === 'radio' || kind === 'checkbox') {
         const scope = el.form || document;
         let group = [];
@@ -460,6 +476,14 @@
       d.entryIndex = idx;
     }
 
+    for (const action of AP.successfactors?.actions(root) || []) {
+      if (out.some(d => d.el === action.element)) continue;
+      const d = base(action.element, 'manual-action');
+      d.label = action.label;
+      d.actionType = action.actionType;
+      d.required ||= action.required;
+      out.push(finish(d));
+    }
     registry.clear();
     for (const d of out) registry.set(d.id, d);
     return out;

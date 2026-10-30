@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url';
 import { getConfig } from '../server/src/config.js';
 import { findChrome, puppeteer } from '../server/src/pdf.js';
 import { testSearch } from './search-e2e.mjs';
+import { testSelectedCv } from './cv-e2e.mjs';
+import { testFormDiagnostic } from './form-diagnostic-e2e.mjs';
+import { testSuccessFactors } from './successfactors-e2e.mjs';
+import { testDocumentPreparation } from './document-preparation-e2e.mjs';
+import { testCvTailor } from './cv-tailor-e2e.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'tests', 'output', 'e2e');
@@ -94,8 +99,9 @@ async function startApi() {
     APPLYPILOT_PROFILE: path.join(OUT, 'profile.yaml'),
     APPLYPILOT_FAKE_PI_DIR: path.join(OUT, 'fake-pi'),
     APPLYPILOT_LINKEDIN_FIXTURE: '1',
+    APPLYPILOT_NATIVE_FIXTURE: '1',
   };
-  const srv = spawn(process.execPath, ['--import', './tests/fixtures/mock-linkedin.mjs', 'server/src/index.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn(process.execPath, ['--import', './tests/fixtures/mock-linkedin.mjs', '--import', './tests/fixtures/mock-native-reveal.mjs', 'server/src/index.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   srv.stdout.on('data', (d) => (logs += d));
   srv.stderr.on('data', (d) => (logs += d));
@@ -472,7 +478,12 @@ async function main() {
       const language = document.querySelector('#uiLanguage').getBoundingClientRect();
       return version.left >= 0 && version.right <= innerWidth && language.right <= innerWidth;
     }));
+    await testSuccessFactors({ panel, site, sw, check });
+    await testDocumentPreparation({ panel, site, sw, apiBase, out: OUT, restoreId: englishApp.id, check });
+    await testSelectedCv({ panel, site, sw, apiBase, out: OUT, check });
     await testSearch({ browser, panel, site, sw, apiBase, out: OUT, check });
+    await testFormDiagnostic({ browser, panel, site, apiBase, out: OUT, check });
+    await testCvTailor({ panel, sw, apiBase, out: OUT, root: ROOT, restoreId: englishApp.id, check });
 
     // Model attribution uses the fake pi event stream, never provider quota.
     check('letter UI distinguishes legacy attribution from settings for the next generation', (await panel.$eval('#letterCard', e => e.textContent)).includes('Legacy letter') && (await panel.$eval('#letterCard', e => e.textContent)).includes('fixture/requested'));

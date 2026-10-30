@@ -1,0 +1,69 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>Synthetic ARIA application</title><style>[role="radio"]{display:inline-block;width:16px;height:16px;border:1px solid #333}span[role="button"]{display:inline-block;min-width:20px;min-height:20px}</style></head><body>
+<!-- Fictional behavioral fixture built from observed structural patterns, not a captured SAP page. -->
+<form id="application"><h1>Candidature de démonstration</h1>
+<div><h2 id="docs"><button aria-expanded="true">Documents</button></h2><div role="group" aria-labelledby="docs">
+  <div><label id="cv-label">CV *</label><div><span id="cv-trigger" role="button" tabindex="0" aria-labelledby="cv-label cv-text"></span><span id="cv-text">Téléverser un CV</span></div></div>
+  <div><label id="letter-label">Lettre d’accompagnement</label><div><span id="letter-trigger" role="button" tabindex="0" aria-labelledby="letter-label letter-text"></span><span id="letter-text">Joindre une lettre d’accompagnement</span></div></div>
+  <div><label id="other-label">Autres pièces jointes</label><div><span id="other-trigger" role="button" tabindex="0" aria-labelledby="other-label other-text"></span><span id="other-text">Ajouter un document</span></div></div>
+  <div role="button" hidden>Téléverser un CV</div>
+</div></div>
+<div><h2 id="education"><button aria-expanded="true">Informations sur les études</button></h2><div role="group" aria-labelledby="education"><p>0 ligne</p><div><div id="add-education" role="button" tabindex="0"><span>Ajouter</span></div></div></div></div>
+<div><h2 id="languages"><button aria-expanded="true">Quelles langues (outre le Français) pouvez-vous parler, lire ou écrire?</button></h2><div role="group" aria-labelledby="languages"><p>0 ligne</p><div><div id="add-language" role="button" tabindex="0"><span>Ajouter</span></div></div></div></div>
+<div><h2 id="personal"><button aria-expanded="true">Informations du candidat</button></h2><div role="group" aria-labelledby="personal">
+  <label for="first">Prénom</label><input id="first">
+  <label for="second-name">Deuxième prénom</label><input id="second-name">
+  <label for="last">Nom de famille</label><input id="last">
+  <label for="second-family">Deuxième nom de famille</label><input id="second-family">
+  <label for="suffix">Suffixe</label><div><input id="suffix" role="combobox" aria-owns="suffix-list" aria-expanded="false" value="Aucune sélection"><button type="button" aria-label="Ouvrir Suffixe" data-combo="suffix">▾</button></div>
+  <label for="country">Pays</label><div><input id="country" role="combobox" aria-owns="country-list" aria-expanded="false" value="Aucune sélection"><button type="button" aria-label="Ouvrir Pays" data-combo="country">▾</button></div>
+  <label for="source-type">Type de source</label><div><input id="source-type" role="combobox" aria-owns="source-type-list" aria-expanded="false" value="Aucune sélection"><button type="button" aria-label="Ouvrir Type de source" data-combo="source-type">▾</button></div>
+  <label for="source-subtype">Sous-type de source</label><div><input id="source-subtype" disabled aria-owns="source-subtype-list" aria-expanded="false" value="Aucune sélection"><button type="button" disabled aria-label="Ouvrir Sous-type de source" data-combo="source-subtype">▾</button></div>
+</div></div>
+<div><h2 id="questions">Questions</h2><div role="group" aria-labelledby="questions">
+  <label id="auth-label">Êtes-vous autorisé à travailler au Canada?</label><div role="radiogroup" aria-labelledby="auth-label" aria-required="true">
+    <span id="auth-yes" role="radio" tabindex="0" aria-checked="false" aria-labelledby="yes-label"></span><label id="yes-label">Oui</label>
+    <span id="auth-no" role="radio" tabindex="0" aria-checked="false" aria-labelledby="no-label"></span><label id="no-label">Non</label>
+  </div>
+  <label id="unknown-label">Votre stage est-il crédité?</label><div role="radiogroup" aria-labelledby="unknown-label"><span role="radio" tabindex="0" aria-checked="false" aria-label="Oui"></span><span role="radio" tabindex="0" aria-checked="false" aria-label="Non"></span></div>
+  <label for="graduation">Quelle est votre date prévue d’obtention du diplôme?</label><textarea id="graduation" required></textarea>
+  <label for="count">Combien de stages avez-vous terminés dans le cadre de votre diplôme?</label><textarea id="count" required></textarea>
+  <label for="program">Quel est votre programme d’études?</label><textarea id="program" required></textarea>
+  <label for="level">Quel est votre niveau d’études?</label><textarea id="level" required></textarea>
+</div></div>
+<span role="button" id="save" tabindex="0">Enregistrer</span><span role="button" id="submit" tabindex="0">Soumettre</span>
+</form>
+<div id="unrelated" role="listbox"><div role="option" id="unrelated-option">Canada</div></div>
+<script>
+window.sfFixture = { clicks: [], submissions: 0, selected: {}, mode: 'normal' };
+const choices = { suffix: ['Mme', 'M.'], country: ['Canada', 'France'], 'source-type': ['Site d’emploi', 'Recommandation'], 'source-subtype': ['LinkedIn', 'Indeed'] };
+for (const button of document.querySelectorAll('[data-combo]')) button.addEventListener('click', () => {
+  const id = button.dataset.combo; const input = document.getElementById(id);
+  document.getElementById(id + '-list')?.remove();
+  const list = document.createElement('div'); list.id = id + '-list'; list.role = 'listbox';
+  input.setAttribute('aria-expanded', 'true');
+  if (sfFixture.mode === 'unowned') input.setAttribute('aria-owns', 'nonexistent-list');
+  for (const text of choices[id]) {
+    const option = document.createElement('div'); option.role = 'option'; option.textContent = text; option.setAttribute('aria-selected', 'false');
+    option.addEventListener('click', () => {
+      option.setAttribute('aria-selected', 'true'); input.value = text; input.setAttribute('aria-expanded', 'false'); list.hidden = true;
+      sfFixture.selected[id] = text;
+      if (id === 'source-type') sfFixture.enableSubtype();
+      if (sfFixture.mode === 'reject') setTimeout(() => { input.value = 'Aucune sélection'; option.setAttribute('aria-selected', 'false'); delete sfFixture.selected[id]; }, 80);
+      if (sfFixture.mode === 'replace') { const replacement = input.cloneNode(true); input.replaceWith(replacement); }
+    });
+    list.append(option);
+  }
+  document.body.append(list);
+});
+sfFixture.enableSubtype = () => { const input = document.getElementById('source-subtype'); input.disabled = false; input.setAttribute('role', 'combobox'); document.querySelector('[data-combo="source-subtype"]').disabled = false; };
+document.addEventListener('keydown', event => {
+  if (event.key === 'Enter') { sfFixture.submissions++; event.preventDefault(); }
+  if (event.key === 'Escape') { for (const list of document.querySelectorAll('[role="listbox"]:not(#unrelated)')) list.hidden = true; for (const input of document.querySelectorAll('input[aria-expanded]')) input.setAttribute('aria-expanded', 'false'); }
+});
+for (const radio of document.querySelectorAll('[role="radio"]')) radio.addEventListener('click', () => {
+  for (const sibling of radio.closest('[role="radiogroup"]').querySelectorAll('[role="radio"]')) sibling.setAttribute('aria-checked', String(sibling === radio));
+  if (sfFixture.mode === 'reject-radio') setTimeout(() => radio.setAttribute('aria-checked', 'false'), 80);
+});
+document.addEventListener('click', event => { const target = event.target.closest('button, [role="button"], [role="radio"], [role="option"]'); if (target) sfFixture.clicks.push(target.id || target.dataset.combo || target.textContent); });
+document.querySelector('form').addEventListener('submit', event => { sfFixture.submissions++; event.preventDefault(); });
+</script><script src="successfactors-upload.js"></script></body></html>

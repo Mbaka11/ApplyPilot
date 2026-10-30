@@ -78,7 +78,7 @@ export function cancelAllPi() {
   for (const cancel of [...activeRuns]) cancel();
 }
 
-function killTree(child) {
+export function killTree(child) {
   if (!child?.pid || child.exitCode !== null) return;
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });

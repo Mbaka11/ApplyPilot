@@ -2,7 +2,7 @@
 (() => {
   if (/(^|\.)linkedin\.com\.?$|(^|\.)google\.(com|ca|fr|co\.uk)\.?$/.test(location.hostname)) return;
   const AP = globalThis.ApplyPilot;
-  AP.VERSION = '0.6.0';
+  AP.VERSION = '0.7.0';
   AP.frameToken = AP.frameToken || Math.random().toString(36).slice(2, 6);
 
   AP.cancelledRuns = AP.cancelledRuns || new Set();
@@ -75,8 +75,9 @@
       company: q.company,
       jobKey: AP.jobKey(),
       pageIdentity: pageIdentity(),
-      fieldCount: fields.filter((f) => f.kind !== 'file').length,
+      fieldCount: fields.filter((f) => !['file', 'manual-action'].includes(f.kind)).length,
       fileCount: fields.filter((f) => f.kind === 'file').length,
+      manualActionCount: fields.filter((f) => f.kind === 'manual-action').length,
       step: plat === 'workday' ? AP.workday.currentStep() : null,
       hasPassword: !!document.querySelector('input[type="password"]'),
     };
@@ -118,11 +119,15 @@
         const r = AP.resolve(d, ctx);
         let res;
         if (!r) res = { status: 'unresolved' };
-        else if (r.skip) res = { status: r.status || 'skip', note: r.note };
+        else if (r.skip) res = { status: r.status || 'skip', note: r.note, value: r.value };
         else if (r.missing) res = { status: 'todo', note: r.note };
         else if (!d.isEmpty && !ctx.options.overwrite && d.kind !== 'file' && d.kind !== 'checkbox' &&
           !(r.multi && Array.isArray(r.value) && ['prompt', 'checkboxes', 'select'].includes(d.kind))) {
-          res = { status: 'kept', value: d.value, note: 'Déjà rempli (non modifié)' };
+          const reviewDate = r.ruleId === 'graduation' && !sameAsRule(d, d.value, r);
+          const reviewCombo = ctx.platform === 'successfactors' && d.kind === 'combobox';
+          res = { status: reviewDate || reviewCombo ? 'check' : 'kept', value: d.value,
+            note: reviewDate ? 'Date existante conservée : vérifie qu’elle correspond à la diplomation prévue dans ton profil.'
+              : reviewCombo ? 'Valeur existante conservée : le texte affiché ne prouve pas que le site a validé cette option.' : 'Déjà rempli (non modifié)' };
         } else {
           try {
             res = await AP.fillField(d, r, ctx);
@@ -189,7 +194,12 @@
       const d = byId.get(id);
       if (!d) continue; // champ d'un autre cadre (iframe)
       let res;
-      if (a.value === null || a.value === undefined || a.value === '') {
+      const protectedAnswer = AP.resolve(d, ctx);
+      if (protectedAnswer?.missing || protectedAnswer?.skip || ['file', 'manual-action'].includes(d.kind)) {
+        res = { status: protectedAnswer?.skip ? protectedAnswer.status || 'skip' : 'todo', note: protectedAnswer?.note || 'Action manuelle requise.' };
+      } else if (!d.isEmpty && !ctx.options.overwrite) {
+        res = { status: 'kept', value: d.value, note: 'Déjà rempli (non modifié)' };
+      } else if (a.value === null || a.value === undefined || a.value === '') {
         res = { status: 'todo', note: a.note || 'Information absente du profil : à remplir' };
       } else {
         const r = { value: a.value, confidence: a.confidence, source: 'ia', multi: Array.isArray(a.value) && CHOICE.has(d.kind) };
@@ -230,7 +240,9 @@
     AP.computePageFlags(ctx, fields);
     const items = [];
     for (const d of fields) {
-      if (d.kind === 'file' || d.kind === 'textarea' || d.inputType === 'password' || d.entryType) continue;
+      if (['file', 'textarea', 'manual-action'].includes(d.kind) || d.manualReason || d.inputType === 'password' || d.entryType) continue;
+      // Editable SAP combobox text alone is not proof of a committed selection.
+      if (ctx.platform === 'successfactors' && d.kind === 'combobox') continue;
       if (d.isEmpty || !d.label || d.label.length < 3) continue;
       const v = d.value;
       if (typeof v === 'string' && v.length > 120) continue;
@@ -259,7 +271,7 @@
     try {
       switch (cmd) {
         case 'ping':
-          return base;
+          return { ...base, successfactorsRevision: AP.sfDocuments?.revision === 1 ? AP.successfactors?.revision || 0 : 0 };
         case 'detect':
           return { ...base, ...detect() };
         case 'extractJob':
@@ -268,6 +280,11 @@
           return { ...base, ...(await fillPage(payload)) };
         case 'fillValues':
           return { ...base, ...(await fillValues(payload)) };
+        case 'sfDocumentPlan':
+          AP.scanFields();
+          return { ...base, ...AP.sfDocuments.prepare(payload, fillContext(payload)) };
+        case 'sfAttachDocument':
+          return { ...base, ...(await AP.sfDocuments.attach(payload, fillContext(payload))) };
         case 'cancel':
           if (payload.runId) {
             AP.cancelledRuns.add(payload.runId);
@@ -290,7 +307,7 @@
       }
     } catch (e) {
       if (e.name === 'AbortError') return { ...base, cancelled: true };
-      return { ...base, error: String(e?.stack || e) };
+      return { ...base, error: String(['sfDocumentPlan', 'sfAttachDocument'].includes(cmd) ? e?.message || e : e?.stack || e) };
     }
   }
 
@@ -299,7 +316,7 @@
   // Mémoire : quand tu passes à l'étape suivante, les réponses non couvertes par le profil sont retenues.
   const NAV_RE = /^(next|continue|save and continue|save & continue|submit|review|suivant|continuer|enregistrer et continuer|sauvegarder et continuer|soumettre|envoyer|postuler|terminer)$/;
   globalThis.__applyPilotOnClick = (e) => {
-    if (!AP.usedHere || !hasRuntime()) return;
+    if (!hasRuntime()) return;
     const btn = e.target?.closest?.('button, [role="button"], input[type="submit"]');
     if (!btn) return;
     const aid = btn.getAttribute('data-automation-id') || '';
@@ -310,6 +327,7 @@
       AP.cancelledRuns.add(AP.activeFill.id);
       chrome.runtime.sendMessage({ type: 'ap:fillCancelled', runId: AP.activeFill.id }).catch(() => {});
     }
+    if (!AP.usedHere) return;
     try {
       const items = captureAnswers();
       if (items.length) chrome.runtime.sendMessage({ type: 'ap:memory', items }).catch(() => {});

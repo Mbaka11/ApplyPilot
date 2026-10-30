@@ -58,3 +58,7 @@ fill:
   # Neutral upload name ({first}, {last}, {lang}); avoids exposing a targeted variant
   # such as CV_EN_Finance.pdf. Blank = keep the original filename.
   cvFileName: "{first}_{last}_CV.pdf"
+
+# Per-posting CV tailoring (optional). Leave empty to find pdflatex on PATH / MiKTeX.
+# cvTailor:
+#   pdflatex: C:/Users/you/AppData/Local/Programs/MiKTeX/miktex/bin/x64/pdflatex.exe

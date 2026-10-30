@@ -15,6 +15,12 @@ check('saved interface choice overrides the browser, without changing document l
   assert.equal(chooseLanguage(null, 'es-ES'), 'en');
   assert.equal(chooseLanguage('auto', 'en-CA'), 'en');
 });
+check('the CV-tailoring panel and its server messages have English coverage', () => {
+  const source = fs.readFileSync(new URL('../extension/sidepanel/cv-tailor.mjs', import.meta.url), 'utf8');
+  const strings = [...source.matchAll(/tr\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'").replace(/\\n/g, '\n'));
+  assert.ok(strings.length > 12);
+  for (const text of strings) assert.ok(Object.hasOwn(EN, text), `Untranslated CV-tailoring text: ${text}`);
+});
 check('French remains the original display language', () => assert.equal(translate('Candidature', 'fr'), 'Candidature'));
 check('English labels and parameterized messages are localized', () => {
   assert.equal(translate('Candidature', 'en'), 'Application');

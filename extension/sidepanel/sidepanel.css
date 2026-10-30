@@ -188,6 +188,14 @@ body {
 #tab-home h3 { overflow-wrap: anywhere; }
 .generation-info { padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--bg); overflow-wrap: anywhere; margin: 6px 0; }
 .generation-info .muted { margin-top: 4px; font-size: 11px; }
+#cvInspector { margin-top: 8px; }
+.cv-file-name, .cv-file-path { overflow-wrap: anywhere; word-break: break-word; }
+.cv-file-name { font-weight: 600; }
+.cv-file-actions, .cv-file-details .row { margin-top: 7px; }
+.cv-file-details { margin-top: 7px; }
+.cv-file-details summary { cursor: pointer; font-size: 12px; }
+.cv-file-path { display: block; margin: 7px 0; padding: 7px; background: var(--bg); border-radius: 4px; font-size: 11px; }
+.cv-file-error { color: var(--bad); margin-top: 6px; }
 @media (max-width: 380px) {
   .tabs { gap: 0; padding-inline: 5px; }
   .tabs button { font-size: 11px; padding-inline: 2px; min-width: 0; }

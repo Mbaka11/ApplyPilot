@@ -2,6 +2,36 @@
 
 All published changes are tracked here. ApplyPilot uses Semantic Versioning; `0.x` is still pre-stable. Release tags are immutable.
 
+
+## [0.7.0] — Unreleased local update
+
+### Added
+- Selected-CV inspector in the Application tab: PDF preview in a new tab, current filename/modification time/size, copyable source path and explicit file-manager action.
+- Windows Explorer/macOS Finder selection and Linux folder opening, limited to configured CV IDs. Native actions require the extension origin and explicit confirmation, never a caller-supplied path or command shell.
+- Read-only per-CV metadata route and fresh file checks before each inspector action; existing neutral upload filenames are unchanged.
+- Isolated file-manager/HTTP/DOM/extension tests, including stale-selection races, escaping, deleted files, failed saves and draft/form preservation.
+- Explicit local form-structure diagnostic download: anonymized DOM/ARIA references, fixed label categories and known component classes; no values, files, raw labels/IDs, URLs, account state, server/model calls or page actions. No new extension permissions or backend endpoint.
+- Isolated privacy, bounded-output, origin/navigation and real-extension download tests using a synthetic SuccessFactors-like form.
+- Partial SuccessFactors adapter: ARIA radio groups, strictly owned exact-option combobox selection and visible manual actions for attachment launchers and education/language Add controls. Unknown dialogs and repeat-entry editing stay manual.
+- Capability-based content reinjection updates older local 0.7.0 scripts without reloading employer forms or changing extension permissions.
+- Explicit SuccessFactors “Prepare and attach CV + cover letter” action: destination confirmation, current CV checks, missing-letter generation/PDF rendering, sequential upload attempts and scoped visible-filename confirmation. Existing drafts/attachments are not silently replaced; no upload-dialog buttons or application submission are clicked.
+- Automatic preparation requires a new server capability advertised by `/health`; the existing letter POST supports `onlyIfMissing: true` to preserve saved letters. Old same-version servers cannot run this workflow until restarted.
+- Per-posting CV tailoring (server side, first step): a copy of the chosen LaTeX CV in which only the About paragraph and the order/selection of skill items change, written to the application folder (`cv-tailored/`). The original CV is never written. Every claim must come from the candidate's own CV/profile: digits in the About text, unknown technical terms, invented or heavily dropped skills, formatting commands and over-long text are refused before LaTeX runs; the copy must compile to exactly one page. Routes: `POST /applications/:id/cv/tailor`, `GET /applications/:id/cv-tailored(.pdf)`, `DELETE /applications/:id/cv-tailored`. Reports whether the copy is stale after the source CV, job or selection changes. Needs a restart, `pdflatex` (MiKTeX/TeX Live or `cvTailor.pdflatex`) and one provider call per attempt. The Application tab has a card with confirmation, Stop, a before/after review, preview, regenerate/delete and a per-copy opt-in; only when opted in (and not out of date) do Fill this page and the SuccessFactors document action upload the tailored PDF instead of the base one.
+- Isolated unit and HTTP tests with a fake model and a fake LaTeX engine; an offline dry run compiled all three real CVs to one page without any provider call.
+
+### Fixed
+- A missing saved CV no longer silently displays the first available variant as selected.
+- Preview and folder actions stay disabled while a CV selection is being saved; a failed save restores the stored selection.
+- Specific graduation/internship-count questions no longer match the generic degree rule; graduation comes from the current profile, while unknown internship counts remain manual. Optional suffix/second names stay blank, and degree/program text uses the FR/EN profile wording for the active posting/page language context.
+- SuccessFactors source categories are no longer populated with a website name. Dropdown text without a verified selection is flagged; nonmatching/unowned lists do not receive typed guesses or Enter.
+- Late AI answers cannot override newly entered user text or fields explicitly reserved for manual completion.
+- Letter-generation disconnects cancel the owned pi process. Concurrent generation is rejected; late results cannot overwrite a changed letter/CV/job. PDF rendering is staged and checked before committing files, with temporary-file cleanup.
+
+### Verification scope
+- Automated native-launch tests simulate the file manager rather than opening real OS windows. A symlink-PDF test is skipped on Windows when the account lacks symlink-creation rights.
+- Voluntarily exported, redacted real-page reports informed the SuccessFactors structural fixes and identified the common CV/cover-letter dialog with a native file input. Original reports remain private; runtime fixtures are independently synthetic. The full document sequence works in isolated extension tests, not yet verified on the employer site. Unknown confirmation behavior fails to manual review; repeated-entry contents are not automated.
+- This local batch has not been committed, pushed or released. Installation does not migrate or rewrite existing private records. The new document action generates/saves a missing letter only after explicit user confirmation, using the configured provider's normal quota.
+
 ## [0.6.0]
 
 ### Added

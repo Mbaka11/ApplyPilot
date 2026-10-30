@@ -178,7 +178,7 @@
   const RULES = [
     R('never', /password|mot de passe|captcha|signature|initials|initiales/, () => ({ skip: true })),
     R('consent', /\b(i )?(agree|accept|acknowledge|consent|certify|confirm|have read|understand)\b|j ?accepte|je (certifie|confirme|consens|reconnais|comprends)|terms|conditions|privacy|confidentialite|politique|attest/,
-      () => ({ skip: true, status: 'check', note: 'Consentement : à lire et cocher toi-même' }), { kinds: ['checkbox'] }),
+      () => ({ skip: true, status: 'check', note: 'Consentement : à lire et cocher toi-même' }), { kinds: ['checkbox', 'radio', 'checkboxes'] }),
     R('coverLetterText', /cover ?letter|lettre (de )?(motivation|presentation)|motivation letter|letter of (motivation|interest|intent)/,
       (d, c) => (c.letterText ? { value: c.letterText, confidence: 0.95, source: 'lettre' } : { missing: true, note: 'Génère la lettre d’abord' }), { kinds: TEXT }),
     R('experience', null, experienceRule, { when: (d) => d.entryType === 'experience', stop: true }),
@@ -189,7 +189,9 @@
     // Identité
     R('preferredNameCheck', /preferred name|nom prefere|prenom usuel|nom d.?usage/, (d, c) => ({ value: !blank(c.p.identity?.preferredName), confidence: 0.9, source: 'profil' }), { kinds: ['checkbox'] }),
     R('preferredName', /preferred|prefere|nickname|surnom|usuel/, (d, c) => (blank(c.p.identity?.preferredName) ? { skip: true } : val(c.p.identity.preferredName)), { kinds: ['text'] }),
-    R('middleName', /middle|second prenom|autre prenom/, () => ({ skip: true }), { kinds: ['text'] }),
+    R('suffix', /\bsuffixe?\b/, (d) => d.required ? { missing: true, note: 'Suffixe requis : choisis toi-même, aucune valeur confirmée dans le profil.' } : { skip: true }),
+    R('middleName', /middle|second prenom|deuxieme prenom|autre prenom|second last name|second family name|deuxieme nom de famille/,
+      (d) => d.required ? { missing: true, note: 'Nom supplémentaire requis : à compléter toi-même.' } : { skip: true }, { kinds: ['text'] }),
     R('firstName', /\b(first|given) ?names?\b|\bprenoms?\b|\bfname\b/, (d, c) => need(c.p.identity?.firstName, 'identity.firstName'), { kinds: ['text'] }),
     R('lastName', /\b(last|family) ?names?\b|\bsurname\b|nom de famille|\blname\b/, (d, c) => need(c.p.identity?.lastName, 'identity.lastName'), { kinds: ['text'] }),
     R('fullName', null,
@@ -264,6 +266,10 @@
     R('travel', /willing to travel|travel (required|requirement)|deplacements?/, (d, c) => yesNo(c.p.standardAnswers?.willingToTravel, 'standardAnswers.willingToTravel'), { kinds: YESNO_KINDS }),
 
     // Source / rémunération
+    R('sourceType', null, (d) => d.isEmpty
+      ? { missing: true, note: 'Choisis le type de source manuellement, puis relance pour le sous-type correspondant. Une catégorie n’est pas un nom de site.' }
+      : { skip: true, status: 'check', value: d.value, note: 'Catégorie existante conservée : vérifie la sélection et son sous-type sur le site.' },
+      { when: () => AP.platform() === 'successfactors', labelTest: /^(type de source|source type)$/ }),
     R('source', /how did you (hear|learn|find)|where did you (hear|see|find)|comment avez vous (entendu|connu|appris|trouve)|ou avez vous (vu|trouve|entendu)|how .{0,20}(hear|learn).{0,20}(about|of) (us|this)|\bsource\b|referral source/,
       (d, c) => val(c.p.preferences?.howDidYouHear || 'LinkedIn', { alts: c.p.preferences?.howDidYouHearAlternatives || [] })),
     R('referral', /referr(ed|al) (by|name)|employee referral|refere par|recommande par|nom (du|de la) (referent|personne)/,
@@ -271,16 +277,23 @@
     R('salary', /salary|salaire|compensation|remuneration|pay (expectation|range)|attentes salariales|taux horaire|hourly rate|desired pay/,
       (d, c) => (blank(c.p.preferences?.salaryExpectation) ? { missing: true, note: 'Salaire : à remplir toi-même (ou preferences.salaryExpectation)' } : val(c.p.preferences.salaryExpectation))),
 
+    // Questions spécifiques avant les mots génériques « diplôme » / « université ».
+    R('internshipCount', /(combien|nombre|how many|number).{0,100}(stages?|internships?)/,
+      (d) => !d.isEmpty && /^\d+$/.test(String(d.value).trim())
+        ? { skip: true, status: 'check', value: d.value, note: 'Nombre existant conservé : confirme qu’il correspond aux stages du programme demandé.' }
+        : { missing: true, note: 'Nombre de stages terminés : à renseigner toi-même selon le programme demandé, sans compter automatiquement les emplois du CV.' }),
+    R('graduation', /\bgraduation\b|\bgraduating\b|when.{0,40}\bgraduate\b|diplomation|expected (completion|graduation|end)|fin (des|de vos) etudes|date de fin d.?etudes|obtention du diplome/,
+      (d, c) => need(c.p.student?.expectedGraduation, 'student.expectedGraduation')),
+    R('studyProgram', /programme? d.?etudes|study program|program(me)? of study/,
+      (d, c) => c.edu0 ? val(c.lang === 'fr' ? c.edu0.degree || c.edu0.degreeEn : c.edu0.degreeEn || c.edu0.degree) : missing('education')),
     // Études (questions isolées)
     R('school', /school|university|universite|college|etablissement|institution|\becole\b/, (d, c) => (c.edu0 ? need(c.edu0.school, 'education[0].school', { alts: c.edu0.schoolSearch }) : missing('education')),
       { notTest: /high school|secondaire/ }),
-    R('degree', /degree|diplome|niveau d ?etudes|education level|level of education|highest (level|education)|cycle d ?etudes/,
-      (d, c) => (c.edu0 ? val(c.edu0.degreeEn || c.edu0.degree, { alts: [...(c.edu0.degreeLevel || []), c.edu0.degree] }) : missing('education'))),
+    R('degree', /degree|diplome|niveau d.?etudes|education level|level of education|highest (level|education)|cycle d.?etudes/,
+      (d, c) => (c.edu0 ? val(c.lang === 'fr' ? c.edu0.degree || c.edu0.degreeEn : c.edu0.degreeEn || c.edu0.degree, { alts: [...(c.edu0.degreeLevel || []), c.edu0.degree, c.edu0.degreeEn] }) : missing('education'))),
     R('field', /field of study|\bmajor\b|discipline|program of study|domaine d ?etudes|speciali[sz]ation|concentration|area of study/,
       (d, c) => (c.edu0 ? need(c.edu0.fieldOfStudy, 'education[0].fieldOfStudy', { alts: c.edu0.fieldOfStudySearch }) : missing('education'))),
     R('gpa', /\bgpa\b|grade point|moyenne|cumulative average|\bcote\b|overall result/, (d, c) => (blank(c.edu0?.gpa) ? missing('education[0].gpa') : val(c.edu0.gpa)), { kinds: ['text'] }),
-    R('graduation', /graduat|diplomation|expected (completion|graduation|end)|fin (des|de vos) etudes|date de fin d ?etudes|obtention du diplome/,
-      (d, c) => need(c.p.student?.expectedGraduation, 'student.expectedGraduation')),
 
     // Disponibilités
     R('startDate', /start date|date de debut|available (to start|from|starting)|availability date|disponible a partir|earliest (start|date)|when can you start|date d ?entree/,
@@ -326,6 +339,7 @@
     'never', 'consent', 'coverLetterText', 'experience', 'education', 'file', 'preferredName', 'preferredNameCheck', 'middleName',
     'firstName', 'lastName', 'fullName', 'email', 'phone', 'phoneExt', 'addr1', 'addr2', 'city', 'postal', 'linkedin', 'github',
     'social', 'website', 'school', 'degree', 'field', 'gpa', 'skills', 'languageEntry', 'websiteEntry',
+    'suffix', 'internshipCount', 'graduation', 'studyProgram', 'sourceType', 'manual-action', 'sf-manual',
   ]);
 
   function matches(rule, d) {
@@ -347,6 +361,8 @@
 
   /** Valeur à mettre dans un champ, ou null si aucune règle ne s'applique (→ IA). */
   function resolve(d, c) {
+    if (d.kind === 'manual-action') return AP.successfactors.actionAnswer(d, c);
+    if (d.manualReason) return { missing: true, note: d.manualReason, ruleId: 'sf-manual' };
     if (d.kind === 'file') return { ...fileRule(d, c), ruleId: 'file' };
     let res = null;
     let rule = null;

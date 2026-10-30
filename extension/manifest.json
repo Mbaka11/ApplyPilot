@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ApplyPilot",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Local-first internship discovery, experimental public LinkedIn, Workday autofill and pi cover letters. English / Français.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -56,6 +56,8 @@
         "content/widgets.js",
         "content/mapping.js",
         "content/workday.js",
+        "content/successfactors.js",
+        "content/successfactors-documents.js",
         "content/main.js"
       ]
     }

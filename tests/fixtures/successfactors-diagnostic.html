@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><link rel="icon" href="data:,"><title>Synthetic form — not a captured SAP page</title></head>
+<body>
+  <!-- Synthetic structures exercising privacy boundaries; not verified SuccessFactors selectors. -->
+  <h1>Candidature de LABEL_CANARY_PRIVATE_NAME</h1>
+  <form id="PRIVATE_FORM_ID" action="/submit?token=PRIVATE_ACTION_TOKEN">
+    <section class="sapMPanel PRIVATE_CLASS_CANARY"><h2>Documents</h2>
+      <div class="sapUiFup" data-sap-ui="PRIVATE_COMPONENT_ID">
+        <label id="PRIVATE_RESUME_LABEL" for="PRIVATE_FILE_ID">CV obligatoire</label>
+        <input id="PRIVATE_FILE_ID" name="PRIVATE_FILE_NAME" type="file" hidden accept="application/pdf">
+        <button type="button" class="sapMBtn" aria-haspopup="dialog" aria-controls="PRIVATE_UPLOAD_DIALOG">Téléverser un CV</button>
+      </div>
+      <button type="button" aria-haspopup="dialog">Joindre une lettre d’accompagnement</button>
+      <button type="button" aria-haspopup="dialog">Ajouter un document</button>
+      <div role="dialog" id="PRIVATE_UPLOAD_DIALOG" hidden><h2>Documents</h2><button type="button">Annuler</button></div>
+    </section>
+    <section class="sapMPanel"><h2>Informations sur les études</h2><table class="sapMListTbl"><tbody></tbody></table><button type="button">Ajouter</button></section>
+    <section class="sapMPanel"><h2>Quelles langues (outre le Français) pouvez-vous parler, lire ou écrire?</h2><table><tbody></tbody></table><button type="button">Ajouter</button></section>
+    <div class="sapUiFormElement">
+      <label id="PRIVATE_SOURCE_LABEL" for="PRIVATE_SOURCE_ID">Type de source</label>
+      <input class="sapMInputBaseInner" id="PRIVATE_SOURCE_ID" name="PRIVATE_SOURCE_NAME" role="combobox" aria-labelledby="PRIVATE_SOURCE_LABEL" aria-controls="PRIVATE_SOURCE_LIST" aria-autocomplete="list" aria-expanded="false" value="PRIVATE_INPUT_CANARY">
+      <div id="PRIVATE_SOURCE_LIST" role="listbox" hidden><div role="option" aria-selected="true">PRIVATE_OPTION_CANARY</div></div>
+    </div>
+    <label for="PRIVATE_SUBSOURCE_ID">Sous-type de source</label><select id="PRIVATE_SUBSOURCE_ID"><option value="PRIVATE_OPTION_VALUE" selected>PRIVATE_SELECT_CANARY</option></select>
+    <label for="PRIVATE_GRAD_ID">Quelle est votre date prévue d’obtention du diplôme?</label><input id="PRIVATE_GRAD_ID" value="PRIVATE_DATE_CANARY" required>
+    <label for="PRIVATE_COUNT_ID">Combien de stages avez-vous terminés dans le cadre de votre diplôme?</label><input id="PRIVATE_COUNT_ID" value="PRIVATE_COUNT_CANARY">
+    <label for="PRIVATE_SUFFIX_ID">Suffixe</label><input id="PRIVATE_SUFFIX_ID">
+    <label for="PRIVATE_PERSON_ID">Prénom de LABEL_CANARY_PRIVATE_NAME</label><input id="PRIVATE_PERSON_ID" aria-label="Prénom PRIVATE_ARIA_CANARY" placeholder="PRIVATE_PLACEHOLDER_CANARY" value="PRIVATE_PERSON_CANARY">
+    <label><input type="checkbox" checked value="PRIVATE_CHECKBOX_CANARY">Déclaration</label>
+    <textarea name="PRIVATE_TEXTAREA_NAME">PRIVATE_TEXTAREA_CANARY</textarea>
+    <div contenteditable="true">PRIVATE_EDITABLE_CANARY <button type="button">PRIVATE_EDITABLE_BUTTON</button></div>
+    <input type="hidden" name="csrf" value="PRIVATE_HIDDEN_CANARY">
+    <input type="password" name="password" value="PRIVATE_PASSWORD_CANARY" aria-label="PRIVATE_PASSWORD_LABEL">
+    <div class="g-recaptcha"><input value="PRIVATE_CAPTCHA_CANARY"></div>
+    <span class="sapMToken">PRIVATE_SELECTED_TOKEN</span><output>PRIVATE_OUTPUT_CANARY</output>
+    <a href="/download?token=PRIVATE_URL_TOKEN" download="PRIVATE_DOWNLOADED_FILENAME.pdf">Téléverser un CV</a>
+    <button type="submit">Soumettre</button>
+  </form>
+  <script>
+    window.formEvents = [];
+    for (const name of ['click', 'input', 'change', 'submit', 'focusin', 'focusout']) document.addEventListener(name, event => { formEvents.push(name); if (name === 'submit') event.preventDefault(); });
+    window.unsavedSentinel = 'UNCHANGED_FORM_SENTINEL';
+  </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
   CONFIG_FILE,
@@ -13,6 +14,8 @@ import {
   profileWarnings,
 } from './config.js';
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
+import { cvFileActions } from './cv-files.js';
+import { TailorError, findLatex, sha256, tailorCv } from './cv-tailor.js';
 import { askJson, cancelAllPi, resolvePi, generationSettings } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
@@ -180,7 +183,8 @@ function appForClient(app) {
   return { ...rest, job: { ...job, descriptionLength: (job?.description || '').length, description: undefined } };
 }
 
-async function renderLetterFiles(app, letter, profile, cfg) {
+const activeLetterGenerations = new Set();
+async function renderLetterFiles(app, letter, profile, cfg, checkpoint = () => {}) {
   const dir = ensureDir(appDir(app.id));
   const fileName = letterFileName({
     profile,
@@ -190,12 +194,15 @@ async function renderLetterFiles(app, letter, profile, cfg) {
     title: app.job.title,
   });
   const html = renderLetterHtml({ letter, profile, cfg, job: app.job });
-  writeText(path.join(dir, 'letter.html'), html);
-  const tmp = path.join(dir, `.rendu-${Date.now()}.pdf`);
-  const fit = await htmlToPdf(html, tmp, { cfg });
+  const tmp = path.join(dir, `.rendu-${randomUUID()}.pdf`);
+  let fit;
+  try {
+    checkpoint();
+    fit = await htmlToPdf(html, tmp, { cfg });
+    checkpoint();
+  } catch (error) { fs.rmSync(tmp, { force: true }); throw error; }
   const target = path.join(dir, fileName);
   try {
-    fs.rmSync(target, { force: true });
     fs.renameSync(tmp, target);
   } catch (e) {
     fs.rmSync(tmp, { force: true });
@@ -204,6 +211,7 @@ async function renderLetterFiles(app, letter, profile, cfg) {
   if (app.letter?.fileName && app.letter.fileName !== fileName) {
     fs.rmSync(path.join(dir, app.letter.fileName), { force: true });
   }
+  writeText(path.join(dir, 'letter.html'), html);
   writeText(path.join(dir, 'letter.txt'), letterPlainText({ letter, profile }));
   letter.fileName = fileName;
   letter.fit = fit;
@@ -263,6 +271,8 @@ route('GET', '/health', () => {
     chrome: findChrome(cfg),
     fill: cfg.fill,
     documents: { transcript: !!(profile && transcriptPath(profile)) },
+    features: { documentPreparation: 1, cvTailoring: 1 },
+    cvTailor: { latexAvailable: !!findLatex(getConfig()) },
   };
 });
 
@@ -283,6 +293,16 @@ route('PUT', '/profile', ({ body }) => updateProfile(body));
 route('GET', '/cvs', () => {
   const { cvs, error } = listCvs(getConfig());
   return { cvs: cvs.map(publicCv), error: error || null };
+});
+
+route('GET', '/cvs/:id/details', ({ params }) => cvFileActions.details(getConfig(), params.id));
+
+route('POST', '/cvs/:id/reveal', ({ params, body, req }) => {
+  // Unlike read-only PDF navigation, launching a file manager must come from
+  // the extension's explicit action. No form POST, GET or caller-supplied path.
+  if (!/^chrome-extension:\/\/[a-p]{32}$/.test(req.headers.origin || '')) throw new HttpError(403, 'Cette action doit être lancée depuis le panneau ApplyPilot.');
+  if (!body || body.confirm !== true || Object.keys(body).length !== 1) throw new HttpError(400, 'Confirme l’ouverture du dossier du CV sélectionné, sans chemin supplémentaire.');
+  return cvFileActions.reveal(getConfig(), params.id);
 });
 
 route('GET', '/cvs/:id/pdf', ({ params, query, res }) => {
@@ -367,13 +387,30 @@ route('DELETE', '/applications/:id', ({ params }) => {
   return { ok: true };
 });
 
-route('POST', '/applications/:id/letter', async ({ params, body }) => {
+route('POST', '/applications/:id/letter', async ({ params, body, res }) => {
+  if (activeLetterGenerations.has(params.id)) throw new HttpError(409, 'Une lettre est déjà en cours de génération pour cette candidature.');
+  const controller = new AbortController();
+  const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', disconnect);
+  if (res.destroyed) controller.abort();
+  activeLetterGenerations.add(params.id);
+  try {
   const cfg = getConfig();
   const profile = getProfile();
   const app = getApplication(params.id);
+  if (body.onlyIfMissing !== undefined && body.onlyIfMissing !== true) throw new HttpError(400, 'Option de préparation automatique invalide.');
+  if (body.onlyIfMissing && (app.letter?.body || app.letter?.fileName)) return { application: appForClient(app), letter: app.letter, reused: true };
+  const originalLetter = JSON.stringify(app.letter), originalJob = JSON.stringify(app.job), selectedCv = app.cvId;
+  const checkpoint = () => {
+    if (controller.signal.aborted) throw new HttpError(499, 'Préparation des documents arrêtée.');
+    const current = getApplication(app.id);
+    if (JSON.stringify(current.letter) !== originalLetter || JSON.stringify(current.job) !== originalJob || current.cvId !== selectedCv || body.onlyIfMissing && current.status === 'soumise') throw new HttpError(409, 'Candidature ou lettre modifiée pendant la génération : résultat non enregistré.');
+  };
+  checkpoint();
   const { cvs } = listCvs(cfg);
   const cvId = body.cvId || app.cvId || recommendCv(cvs, app.job)?.cvId;
   const cv = cvs.find((c) => c.id === cvId) || null;
+  if (body.onlyIfMissing && (!cv || app.status === 'soumise' || app.cvId !== cvId || !app.job.company || !app.job.title || (app.job.description || '').trim().length < 100)) throw new HttpError(409, 'Analyse l’offre et sélectionne son CV avant la préparation automatique.');
   const prompt = buildLetterPrompt({
     job: app.job,
     profile,
@@ -385,7 +422,8 @@ route('POST', '/applications/:id/letter', async ({ params, body }) => {
     instructions: String(body.instructions || '').slice(0, 2000),
     cfg,
   });
-  const { data, ms, runner, generation } = await askJson(prompt, { cfg, thinking: cfg.llm.letterThinking });
+  const { data, ms, runner, generation } = await askJson(prompt, { cfg, thinking: cfg.llm.letterThinking, signal: controller.signal });
+  checkpoint();
   if (!data || typeof data.body !== 'string' || data.body.trim().length < 200) {
     throw new HttpError(502, 'pi a renvoyé une lettre vide ou incomplète, réessaie');
   }
@@ -395,8 +433,8 @@ route('POST', '/applications/:id/letter', async ({ params, body }) => {
     subject: String(data.subject || '').replace(/^\s*(objet|subject|re)\s*:\s*/i, '').trim(),
     body: data.body.trim(),
     recipient: String(data.recipient || '').trim(),
-    company: String(data.company || app.job.company || '').trim(),
-    jobTitle: String(data.jobTitle || app.job.title || '').trim(),
+    company: String(body.onlyIfMissing ? app.job.company : data.company || app.job.company || '').trim(),
+    jobTitle: String(body.onlyIfMissing ? app.job.title : data.jobTitle || app.job.title || '').trim(),
     location: String(data.location || app.job.location || '').trim(),
     highlights: cleanList(data.highlights),
     warnings: cleanList(data.warnings),
@@ -412,7 +450,7 @@ route('POST', '/applications/:id/letter', async ({ params, body }) => {
   if (!app.job.company && letter.company) app.job.company = letter.company;
   if (!app.job.title && letter.jobTitle) app.job.title = letter.jobTitle;
   const originalCvId = app.cvId;
-  await renderLetterFiles(app, letter, profile, cfg);
+  await renderLetterFiles(app, letter, profile, cfg, checkpoint);
   // Keep status/notes changes made while the provider or PDF renderer was busy.
   const latest = getApplication(app.id);
   latest.letter = app.letter;
@@ -421,6 +459,10 @@ route('POST', '/applications/:id/letter', async ({ params, body }) => {
   if (latest.cvId === originalCvId) latest.cvId = cvId;
   saveApplication(latest);
   return { application: appForClient(latest), letter: latest.letter };
+  } finally {
+    activeLetterGenerations.delete(params.id);
+    res.off('close', disconnect);
+  }
 });
 
 route('PUT', '/applications/:id/letter', async ({ params, body }) => {
@@ -461,6 +503,106 @@ route('GET', '/applications/:id/letter.txt', ({ params, res }) => {
   const app = getApplication(params.id);
   sendFile(res, path.join(appDir(app.id), 'letter.txt'), { type: 'text/plain; charset=utf-8' });
   return undefined;
+});
+
+// ---------------------------------------------------------------------------
+// CV adapté à une offre : copie du CV choisi dont seuls « À propos » et l'ordre des compétences changent.
+// Jamais d'envoi, jamais d'écriture dans le CV d'origine.
+// ---------------------------------------------------------------------------
+const activeCvTailoring = new Set();
+const tailorDir = (id) => path.join(appDir(id), 'cv-tailored');
+const jobFingerprint = (job) => sha256(JSON.stringify([job.title, job.company, job.description]));
+function tailoredReport(app) {
+  const file = path.join(tailorDir(app.id), 'report.json');
+  if (!app.cvTailored || !fs.existsSync(file)) throw new HttpError(404, 'Aucun CV adapté pour cette candidature.');
+  const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const { cvs } = listCvs(getConfig());
+  const cv = cvs.find((c) => c.id === report.baseCvId);
+  let baseChanged = true;
+  try { baseChanged = !cv?.texPath || sha256(fs.readFileSync(cv.texPath, 'utf8')) !== report.baseTexSha256; } catch { /* source unavailable */ }
+  return { ...report, stale: { baseChanged, jobChanged: jobFingerprint(app.job) !== report.jobSha256, cvChanged: app.cvId !== report.baseCvId } };
+}
+const asTailorHttp = (e) => (e instanceof TailorError ? new HttpError(e.status, e.message) : e);
+
+route('POST', '/applications/:id/cv/tailor', async ({ params, body, res }) => {
+  if (activeCvTailoring.has(params.id)) throw new HttpError(409, 'Un CV est déjà en cours d’adaptation pour cette candidature.');
+  if (!body || Object.keys(body).some((k) => !['cvId', 'instructions'].includes(k))) throw new HttpError(400, 'Requête d’adaptation du CV invalide.');
+  const controller = new AbortController();
+  const disconnect = () => { if (!res.writableEnded) controller.abort(); };
+  res.once('close', disconnect);
+  if (res.destroyed) controller.abort();
+  activeCvTailoring.add(params.id);
+  try {
+    const cfg = getConfig();
+    const app = getApplication(params.id);
+    const cvId = body.cvId || app.cvId;
+    const { cvs } = listCvs(cfg);
+    const cv = cvs.find((c) => c.id === cvId);
+    if (!cv) throw new HttpError(409, 'Sélectionne un CV avant de l’adapter à l’offre.');
+    if (app.status === 'soumise') throw new HttpError(409, 'Cette candidature est déjà soumise : le CV n’est plus adapté.');
+    if (!app.job.title || (app.job.description || '').trim().length < 100) throw new HttpError(409, 'Analyse l’offre (titre et description) avant d’adapter le CV.');
+    const snapshot = JSON.stringify([app.job, app.cvId, app.cvTailored || null, app.status]);
+    const checkpoint = () => {
+      if (controller.signal.aborted) throw new HttpError(499, 'Adaptation du CV arrêtée.');
+      const now = getApplication(app.id);
+      if (JSON.stringify([now.job, now.cvId, now.cvTailored || null, now.status]) !== snapshot) throw new HttpError(409, 'Candidature modifiée pendant l’adaptation : résultat non enregistré.');
+    };
+    let result;
+    try {
+      result = await tailorCv({ job: app.job, cv, profile: getProfile(), cfg, instructions: String(body.instructions || '').slice(0, 1000), ask: askJson, signal: controller.signal });
+    } catch (e) { throw asTailorHttp(e); }
+    checkpoint();
+    const dir = ensureDir(tailorDir(app.id));
+    const tmp = path.join(dir, `.pdf-${randomUUID()}.tmp`);
+    const report = { ...result.report, createdAt: new Date().toISOString(), jobSha256: jobFingerprint(app.job) };
+    try {
+      fs.writeFileSync(tmp, result.pdf);
+      fs.renameSync(tmp, path.join(dir, 'CV.pdf'));
+    } catch (e) {
+      fs.rmSync(tmp, { force: true });
+      throw new HttpError(409, `Impossible d’écrire le CV adapté (${e.code || e.message}). Ferme le PDF s’il est ouvert dans un lecteur.`);
+    }
+    writeText(path.join(dir, 'main.tex'), result.tex);
+    writeText(path.join(dir, 'report.json'), JSON.stringify(report, null, 2));
+    const latest = getApplication(app.id);
+    latest.cvTailored = { schema: 1, baseCvId: report.baseCvId, createdAt: report.createdAt, pages: report.pages, language: report.language, file: 'cv-tailored/CV.pdf', useForForms: false };
+    saveApplication(latest);
+    return { application: appForClient(latest), tailoredCv: tailoredReport(latest) };
+  } finally {
+    activeCvTailoring.delete(params.id);
+    res.off('close', disconnect);
+  }
+});
+
+route('GET', '/applications/:id/cv-tailored', ({ params }) => ({ tailoredCv: tailoredReport(getApplication(params.id)) }));
+
+route('GET', '/applications/:id/cv-tailored.pdf', ({ params, query, res }) => {
+  const app = getApplication(params.id);
+  const report = tailoredReport(app);
+  const file = path.join(tailorDir(app.id), 'CV.pdf');
+  if (query.get('base64')) return fileAsBase64(file, cvUploadName({ file: 'CV.pdf', language: report.language }));
+  sendFile(res, file, { type: 'application/pdf', downloadName: 'CV_adapte.pdf' });
+  return undefined;
+});
+
+route('PUT', '/applications/:id/cv-tailored/use', ({ params, body }) => {
+  if (!body || typeof body.use !== 'boolean' || Object.keys(body).length !== 1) throw new HttpError(400, 'Choix d’utilisation du CV adapté invalide.');
+  if (activeCvTailoring.has(params.id)) throw new HttpError(409, 'Un CV est en cours d’adaptation pour cette candidature.');
+  const app = getApplication(params.id);
+  const report = tailoredReport(app);
+  if (body.use && (app.status === 'soumise' || report.stale.baseChanged || report.stale.jobChanged || report.stale.cvChanged)) throw new HttpError(409, 'Le CV adapté est périmé : régénère-le avant de l’utiliser.');
+  app.cvTailored.useForForms = body.use;
+  saveApplication(app);
+  return { application: appForClient(app), tailoredCv: tailoredReport(app) };
+});
+
+route('DELETE', '/applications/:id/cv-tailored', ({ params }) => {
+  if (activeCvTailoring.has(params.id)) throw new HttpError(409, 'Un CV est en cours d’adaptation pour cette candidature.');
+  const app = getApplication(params.id);
+  fs.rmSync(tailorDir(app.id), { recursive: true, force: true });
+  delete app.cvTailored;
+  saveApplication(app);
+  return { application: appForClient(app) };
 });
 
 route('POST', '/answers', async ({ body, res }) => {

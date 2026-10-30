@@ -1,0 +1,31 @@
+\documentclass[a4paper,10pt]{article}
+\newcommand{\sechead}[1]{\noindent\textbf{\large #1}\par}
+\begin{document}
+\noindent\textbf{ALEX EXEMPLE} \\ Master's student in Machine Learning
+
+\begin{tabularx}{\textwidth}[t]{@{}p{0.45\textwidth}@{\hspace{2em}}p{0.51\textwidth}@{}}
+  \parbox[t]{\linewidth}{
+    \sechead{ABOUT ME}
+    I like turning machine learning into tools people actually use, especially where good ideas have to survive real data, constraints and users. I learn by building, and I enjoy teaching and organizing. I am looking for an internship where I can own a problem end to end.
+  }
+  &
+  \parbox[t]{\linewidth}{
+    \sechead{SKILLS}
+    \begin{tabular}{@{}p{2.5cm}p{3cm}@{}}
+      \textbf{Programming:} & Python, SQL, C++, Java, Bash, R \\[0.2em]
+      \textbf{ML / Data:} & PyTorch, Scikit-learn, TensorFlow, \mbox{Hugging Face}, MLflow, RL \\[0.2em]
+      \textbf{Tools:} & Azure, Databricks, Snowflake, Docker, Git \\[0.2em]
+      \textbf{Languages:} & English, French, Spanish
+    \end{tabular}
+  }
+\end{tabularx}
+
+\sechead{EXPERIENCE}
+\begin{tabularx}{\textwidth}{@{}p{3cm} X@{}}
+  5/2026 -- 12/2026 & \textbf{Data Science Intern} \hfill \textbf{\textit{Example Corp}} \\
+  & \textbullet\ Developed AI agents used by 100+ colleagues to analyze business data. \\
+  & \texttt{Python / Azure / Snowflake} \\
+  9/2025 -- 4/2026 & \textbf{ML Intern} \hfill \textbf{\textit{Sample Insurance}} \\
+  & \textbullet\ Built reinforcement learning pricing policies validated in simulation with PyTorch and MLflow. \\
+\end{tabularx}
+\end{document}

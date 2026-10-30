@@ -7,6 +7,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { applicationUrl, existingApplicationTab } from '../extension/sidepanel/navigation.mjs';
+import { testDocumentPreparationServer } from './document-preparation-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 4399;
@@ -106,9 +107,9 @@ letter: { signatureName: Marie Tremblay }
 
 async function main() {
   prepareFixtures();
-  const srv = spawn(process.execPath, ['--import', './tests/fixtures/mock-linkedin.mjs', 'server/src/index.js'], {
+  const srv = spawn(process.execPath, ['--import', './tests/fixtures/mock-linkedin.mjs', '--import', './tests/fixtures/mock-native-reveal.mjs', 'server/src/index.js'], {
     cwd: ROOT,
-    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA, APPLYPILOT_PROFILE: TEST_PROFILE, APPLYPILOT_CONFIG: TEST_CONFIG, APPLYPILOT_CV_DIR: path.join(OUT, 'cvs'), APPLYPILOT_FAKE_PI_DIR: path.join(OUT, 'fake-pi'), APPLYPILOT_LINKEDIN_FIXTURE: '1' },
+    env: { ...process.env, APPLYPILOT_PORT: String(PORT), APPLYPILOT_DATA_DIR: DATA, APPLYPILOT_PROFILE: TEST_PROFILE, APPLYPILOT_CONFIG: TEST_CONFIG, APPLYPILOT_CV_DIR: path.join(OUT, 'cvs'), APPLYPILOT_FAKE_PI_DIR: path.join(OUT, 'fake-pi'), APPLYPILOT_LINKEDIN_FIXTURE: '1', APPLYPILOT_NATIVE_FIXTURE: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';
@@ -281,6 +282,31 @@ Posting End Date 2026-10-14`,
       const pdf = await api('GET', `/cvs/${encodeURIComponent(cvId)}/pdf?base64=1`);
       check('CV en base64', pdf.status === 200 && pdf.data.base64?.length > 1000, pdf.data.name);
       check('nom de CV neutre à l’envoi (pas celui de la variante)', pdf.data.name === 'Marie_Tremblay_CV.pdf', pdf.data.name);
+      const file = path.join(OUT, 'cvs', cvs.data.cvs[0].file);
+      const original = fs.readFileSync(file);
+      const details = await api('GET', `/cvs/${encodeURIComponent(cvId)}/details`);
+      check('CV details resolve the configured source file, size and modified time', details.status === 200 && details.data.id === cvId && details.data.pdfPath === fs.realpathSync(file) && details.data.size === original.length && !!details.data.modifiedAt);
+      check('bulk CV list still omits filesystem paths', cvs.data.cvs.every(cv => !cv.pdfPath && !cv.texPath));
+      const preview = await api('GET', `/cvs/${encodeURIComponent(cvId)}/pdf?t=fixture`);
+      check('CV preview is an uncached inline PDF with the exact current bytes', preview.status === 200 && preview.headers.get('content-disposition').startsWith('inline;') && preview.headers.get('cache-control') === 'no-store' && preview.data.equals(original));
+      const nativeLog = path.join(DATA, 'native-reveal-log.jsonl');
+      const nativeCalls = () => fs.existsSync(nativeLog) ? fs.readFileSync(nativeLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+      const deniedDetails = await api('GET', `/cvs/${encodeURIComponent(cvId)}/details`, undefined, { origin: 'https://evil.example.com' });
+      const deniedReveal = await api('POST', `/cvs/${encodeURIComponent(cvId)}/reveal`, { confirm: true }, { origin: 'https://evil.example.com' });
+      check('CV metadata and native action reject foreign website origins', deniedDetails.status === 403 && deniedReveal.status === 403);
+      check('native reveal rejects requests without an extension origin', (await api('POST', `/cvs/${encodeURIComponent(cvId)}/reveal`, { confirm: true })).status === 403);
+      check('native reveal requires an explicit confirmed action', (await api('POST', `/cvs/${encodeURIComponent(cvId)}/reveal`, {}, { origin: EXT_ORIGIN })).status === 400);
+      check('caller-supplied file paths cannot be used for native reveal', (await api('POST', `/cvs/${encodeURIComponent(cvId)}/reveal`, { confirm: true, path: TEST_PROFILE }, { origin: EXT_ORIGIN })).status === 400);
+      check('GET cannot trigger a native reveal', (await api('GET', `/cvs/${encodeURIComponent(cvId)}/reveal`, undefined, { origin: EXT_ORIGIN })).status === 404);
+      const unknown = encodeURIComponent('../profile.yaml');
+      check('path traversal and unknown IDs cannot expose or reveal another file', (await api('GET', `/cvs/${unknown}/details`)).status === 404 && (await api('POST', `/cvs/${unknown}/reveal`, { confirm: true }, { origin: EXT_ORIGIN })).status === 404 && nativeCalls().length === 0);
+      const revealed = await api('POST', `/cvs/${encodeURIComponent(cvId)}/reveal`, { confirm: true }, { origin: EXT_ORIGIN });
+      const calls = nativeCalls();
+      check('confirmed native request uses only the configured PDF and no shell (simulated OS)', revealed.status === 200 && revealed.data.requested && calls.length === 1 && calls[0].shell === false && calls[0].args.includes(process.platform === 'linux' ? path.dirname(fs.realpathSync(file)) : fs.realpathSync(file)));
+      fs.writeFileSync(path.join(DATA, 'native-reveal-mode.json'), JSON.stringify({ mode: 'error' }));
+      const launchError = await api('POST', `/cvs/${encodeURIComponent(cvId)}/reveal`, { confirm: true }, { origin: EXT_ORIGIN });
+      check('file-manager launch failure is reported without modifying the file', launchError.status === 502 && fs.readFileSync(file).equals(original));
+      fs.rmSync(path.join(DATA, 'native-reveal-mode.json'));
     }
 
     console.log('Candidature');
@@ -363,6 +389,7 @@ Posting End Date 2026-10-14`,
       const edited = await api('PUT', `/applications/${app.id}/letter`, { subject: 'Reviewed synthetic letter' });
       check('editing a generated letter preserves provenance and marks the edit', edited.data.letter?.editedAfterGeneration && JSON.stringify(edited.data.letter.generation) === JSON.stringify(generated.data.letter.generation));
       await api('PATCH', `/applications/${app.id}`, { status: 'en cours' });
+      await testDocumentPreparationServer({ api, check, base: BASE, dataDir: DATA, markerDir, app, job: SAMPLE_JOB, sampleBody: SAMPLE_BODY });
     } finally {
       controller.abort();
       fs.writeFileSync(TEST_CONFIG, originalConfig);

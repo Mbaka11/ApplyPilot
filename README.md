@@ -1,8 +1,10 @@
 # ApplyPilot
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
 ![Chrome extension](https://img.shields.io/badge/Chrome-Manifest_V3-green)
 ![Interface](https://img.shields.io/badge/interface-English_%2F_Fran%C3%A7ais-purple)
+
+> **Local 0.7.0 update — not published yet.** Adds selected-CV inspection, an opt-in local form diagnostic and partial SuccessFactors automation, including an explicit CV/cover-letter preparation and attachment action. The latest public release is [0.6.0](https://github.com/Mbaka11/ApplyPilot/releases/tag/v0.6.0).
 
 > **LinkedIn integration is experimental.** Its public surface returned 200 during an initial probe, then 429 during connector validation. It is **not a reliable or officially supported integration**. Version 0.6.0 includes the bounded connector with these limitations, not a claim of production readiness. See the [investigation and verification notes](docs/prototype.md).
 
@@ -11,8 +13,11 @@
 - 🏠 **Contextual home** — discovery, current-page actions, tracking counts and explicit resumption; no forced return to the last application.
 - 🔍 **Internship discovery** — job-link classification, platform badges and separate provenance filters. Bounded Google collection, an experimental public LinkedIn connector, and manual imports share a catalog independent of applications.
 - 📄 **Tailored cover letters** — pi drafts editable, one-page PDFs using the posting and your CV source. See the requested model/effort before generation and the model reported by pi afterward; old letters are not assigned invented metadata.
-- ✍️ **Form autofill** — Workday is the priority: contact details, addresses, phone numbers, experience, education, dates, eligibility questions, languages and websites. Generic forms, including Greenhouse- and Lever-style pages, are also supported.
+- ✍️ **Form autofill** — Workday is the priority: contact details, addresses, phone numbers, experience, education, dates, eligibility questions, languages and websites. Generic forms, including Greenhouse- and Lever-style pages, are also supported. [SuccessFactors support is partial](docs/successfactors.md): ARIA controls, question matching and a guarded document-upload workflow. Repeated education/language sections remain manual.
 - 📎 **Attachments** — select an appropriate French, English or specialized CV; attach it, your cover letter and your configured transcript when relevant.
+- 📑 **Prepare and attach CV + cover letter (SuccessFactors)** — confirm the destination, generate a missing letter and PDF, then transfer the selected documents through recognized upload dialogs. Existing files/drafts are preserved; uncertain uploads stop for review. Requires the updated local server; never submits the application.
+- 👁️ **Inspect the selected CV** — preview the actual PDF, see its filename/modification time and copy its local path, or reveal the configured file in your file manager.
+- 🧩 **Local form diagnostic** — explicitly download a bounded structure-only JSON report to investigate unrecognized controls. No field values, attachments, raw labels/IDs, full URLs, account data or automatic upload. [Scope and instructions](docs/form-diagnostic.md).
 - 🧠 **Open questions** — generate suggested answers without inventing missing profile facts. AI answers always require review.
 - 🗂️ **Application tracker** — status, dates, selected CV and cover letter, plus CSV export.
 - 🔁 **Answer memory** — reuse answers to recurring questions on future applications.
@@ -94,6 +99,7 @@ Open **Search**, review the internship keywords, AI/software/data/consulting dom
 - The default catalog view shows **identified job links** rather than listing pages. Known aggregator listings are skipped during Google collection; old listing/unknown entries remain accessible without deletion.
 - Filter **Platform** separately from **Discovery method**: a Google-found LinkedIn URL is not evidence of direct LinkedIn collection.
 - Save, hide, restore, filter or delete catalog entries without creating applications. To apply, explicitly open the employer posting and use **Analyze this posting**.
+- **Sort by** relevance or publication date (newest/oldest first). Publication dates are mainly available for public LinkedIn results; undated offers stay at the bottom in both date orders, without substituting discovery dates.
 - Ranking is a simple keyword score, not an eligibility or vacancy check. Google can block collection or change its markup; there is no bypass and no exhaustive-results guarantee.
 
 Search does not invoke pi or send your CV/contact details to a model. Google queries go through a dedicated browser tab; experimental LinkedIn queries go directly from the server. See the [search workflow, limits, privacy and API contract](docs/search.md).
@@ -118,6 +124,16 @@ An incorrect submission mark can be reversed by selecting **In progress** in the
 **Generation provenance:** the letter card distinguishes settings for the next call from the previous generation. Pi's JSON assistant events supply the reported provider/model. The requested reasoning level is retained, but **pi does not report the effective level**; neither private reasoning blocks nor signatures are stored or displayed. Legacy/manual letters show unknown attribution. Subsequent manual edits retain provenance and are labelled accordingly. Changing applications or regenerating asks before discarding a draft.
 
 <details><summary>Letter provenance preview (fake pi, no provider quota)</summary><img src="docs/prototype/letter.png" width="360" alt="Requested settings and observed model attribution for a synthetic cover letter"></details>
+
+### Inspect the selected CV
+
+Under **Application → CV to attach**, use **Preview CV** to open the current source PDF in a new tab without reloading your form. **Show in folder** selects that original file in Windows Explorer or macOS Finder; on Linux it opens the containing folder. **File and location** shows the exact path with **Copy path** and **Refresh file**, plus the filename, size and modification time.
+
+Each action rechecks the configured CV ID. Selection changes must save successfully before the actions become available; a missing CV is not silently replaced with another variant. No `file://` permission or arbitrary-path opening is added. The explicit native action requires the extension origin and confirmation and uses no command shell.
+
+This inspects the **current source PDF**, not a document previously uploaded to an employer. Previewing or updating the source does not replace an old attachment already on a form. It also does not synchronize experiences from the CV into `profile.yaml`. See [CV inspection and safety](docs/cv-inspection.md).
+
+<details><summary>Selected-CV preview (fictional candidate and local test paths)</summary><img src="docs/cv-preview.png" width="360" alt="Selected CV with PDF preview, file-manager action and copyable local source path"></details>
 
 ### Stop a blocked autofill
 
@@ -237,6 +253,7 @@ The bump command synchronizes release metadata and opens a changelog section. It
 cd server
 npm test                     # version, i18n, cancellation, discovery, server, content and extension tests
 npm run test:search          # helpers, catalog, runner and locally intercepted Chrome parsing
+npm run test:cv              # file metadata, simulated native launches and inspector DOM races
 # Optional: real generation using your authenticated provider (uses quota):
 set APPLYPILOT_TEST_LLM=1 && npm run test:server   # Windows
 ```
