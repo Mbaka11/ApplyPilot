@@ -19,7 +19,7 @@ import { TailorError, findLatex, sha256, tailorCv } from './cv-tailor.js';
 import { askJson, cancelAllPi, resolvePi, generationSettings } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
-import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery } from './search.js';
+import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery, clearDiscoveries } from './search.js';
 import { searchLinkedInPage } from './linkedin.js';
 import { detectRequirements, transcriptPath } from './requirements.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
@@ -343,6 +343,7 @@ route('POST', '/search/linkedin', async ({ body, res }) => {
   } finally { res.removeListener('close', disconnect); }
 });
 route('PATCH', '/search/jobs/:id', ({ params, body }) => { updateDiscovery(params.id, body); return discoveryView(); });
+route('POST', '/search/clear', ({ body }) => ({ ...clearDiscoveries(body), ...discoveryView() }));
 route('DELETE', '/search/jobs/:id', ({ params }) => { deleteDiscovery(params.id); return discoveryView(); });
 
 route('GET', '/applications', () => ({ applications: listApplications().map(summary), statuses: STATUSES }));

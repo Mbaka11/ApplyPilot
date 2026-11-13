@@ -5,6 +5,10 @@ All published changes are tracked here. ApplyPilot uses Semantic Versioning; `0.
 
 ## [0.7.0] — Unreleased local update
 
+### Search updates
+- Search opens sorted by newest publication date; relevance/oldest-first options remain, and unknown publication dates stay last.
+- Explicit FR/EN Clear catalog action removes all discoveries (including saved/hidden links), with confirmation, exact private backup and an ID-snapshot guard against concurrent additions/removals. Application records, CVs, letters and search settings are preserved.
+
 ### Added
 - Selected-CV inspector in the Application tab: PDF preview in a new tab, current filename/modification time/size, copyable source path and explicit file-manager action.
 - Windows Explorer/macOS Finder selection and Linux folder opening, limited to configured CV IDs. Native actions require the extension origin and explicit confirmation, never a caller-supplied path or command shell.

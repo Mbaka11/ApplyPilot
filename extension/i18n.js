@@ -2,6 +2,11 @@
 // French source keys keep the existing UI and server messages backward-compatible.
 (() => {
 const EN = {
+  'Vider le catalogue': 'Clear catalog',
+  'Supprimer les {count} liens du catalogue, y compris les favoris et les liens masqués ? Une sauvegarde locale sera conservée. Les candidatures, CV, lettres et filtres de recherche ne seront pas supprimés.': 'Delete all {count} catalog links, including saved and hidden links? A local backup will be kept. Applications, CVs, cover letters and search settings will not be deleted.',
+  'Catalogue vidé. Les candidatures et les filtres de recherche sont conservés.': 'Catalog cleared. Applications and search settings are preserved.',
+  'Confirmation de suppression du catalogue invalide.': 'Invalid catalog-clear confirmation.',
+  'Le catalogue a changé : actualise-le avant de confirmer sa suppression.': 'The catalog changed: refresh it before confirming its deletion.',
   'Arrêter': 'Stop',
   'Remplissage arrêté': 'Autofill stopped',
   'Remplissage arrêté. Les champs déjà remplis sont conservés.': 'Autofill stopped. Existing entries are preserved.',

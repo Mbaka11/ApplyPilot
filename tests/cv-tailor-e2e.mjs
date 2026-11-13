@@ -109,6 +109,7 @@ export async function testCvTailor({ panel, sw, apiBase, out, restoreId, check, 
     check('discarding removes the copy and leaves the original CV', !discarded.cvTailored && !fs.existsSync(path.join(out, 'data', 'applications', app.id, 'cv-tailored')) && fs.readFileSync(texFile, 'utf8') === sample);
 
     await panel.select('#uiLanguage', 'fr');
+    await panel.waitForFunction(() => document.querySelector('#cvTailor')?.textContent.includes('Adapter le CV à cette offre'));
     check('the tailoring card is available in French', (await text()).includes('Adapter le CV à cette offre'));
     await panel.select('#uiLanguage', 'en');
     await panel.setViewport({ width: 320, height: 1000 });

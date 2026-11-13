@@ -49,6 +49,7 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   await set('#letterSubject', 'Unsaved letter search draft');
   await panel.click('[data-tab="search"]');
   await panel.waitForSelector('#searchKeywords');
+  check('search defaults to newest publication date', (await panel.$eval('#searchSort', el => el.value)) === 'published-desc');
   await panel.click('#searchSettingsDetails > summary');
   await panel.click('#searchManualDetails > summary');
   check('search defaults cover AI/software/data/consulting and editable internship keywords', (await panel.$$eval('[data-search-category]:checked', els => els.length)) === 4 && (await panel.$eval('#searchKeywords', el => el.value)).includes('internship'));
@@ -211,6 +212,18 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   await panel.waitForFunction(() => document.querySelector('#searchProgress')?.textContent.includes('access is paused'));
   check('cooldown prevents an immediate manual restart from contacting LinkedIn', requests().filter(row => row.type === 'request').length === blockedCount);
   check('experimental collection still preserves application records, profile and form values', JSON.stringify((await request('/applications')).applications) === appsBefore && fs.readFileSync(path.join(out, 'profile.yaml'), 'utf8') === profileBefore && await site.evaluate(() => globalThis.discoveryUnsaved === 'untouched-form'));
+  const beforeClear = await request('/search');
+  panel.once('dialog', dialog => dialog.dismiss());
+  await panel.click('[data-search-action="clear"]');
+  check('declining clear preserves all catalog links', JSON.stringify(await request('/search')) === JSON.stringify(beforeClear));
+  let clearMessage = '';
+  panel.once('dialog', dialog => { clearMessage = dialog.message(); dialog.accept(); });
+  await panel.click('[data-search-action="clear"]');
+  await panel.waitForFunction(() => document.querySelector('#searchCount')?.textContent.startsWith('0 / 0'));
+  const afterClear = await request('/search');
+  check('clear confirmation covers all links including saved and hidden, not only filters', clearMessage.includes(String(beforeClear.jobs.length)) && clearMessage.includes('saved and hidden') && clearMessage.includes('Applications'));
+  check('clear empties the catalog but preserves settings and applications', afterClear.jobs.length === 0 && JSON.stringify(afterClear.settings) === JSON.stringify(beforeClear.settings) && JSON.stringify((await request('/applications')).applications) === appsBefore);
+  check('clear keeps an exact private rollback backup', fs.readdirSync(path.join(out, 'data', 'backups', 'search')).some(name => name.startsWith('discovery-before-clear-')));
   await panel.click('[data-tab="home"]');
   await panel.waitForSelector('#tab-home .home-metrics');
   await panel.evaluate(() => { window.scrollTo(0, 0); document.querySelector('#toast').className = 'toast'; });

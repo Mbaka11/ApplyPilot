@@ -158,6 +158,24 @@ export function updateDiscovery(id, values) {
   job.status = values.status;
   write(state);
 }
+/** Explicit whole-catalog clear; preserve settings and an exact private rollback copy. */
+export function clearDiscoveries(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || input.confirm !== true ||
+      Object.keys(input).length !== 2 || !Array.isArray(input.ids) || input.ids.length > LIMIT ||
+      input.ids.some(id => !validId(id)) || new Set(input.ids).size !== input.ids.length) {
+    fail(400, 'Confirmation de suppression du catalogue invalide.');
+  }
+  const state = read();
+  const expected = [...input.ids].sort(), actual = state.jobs.map(job => job.id).sort();
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) fail(409, 'Le catalogue a changé : actualise-le avant de confirmer sa suppression.');
+  const removed = state.jobs.length;
+  if (!removed) return { removed: 0 };
+  const dir = ensureDir(path.join(DATA_DIR, 'backups', 'search'));
+  fs.copyFileSync(file(), path.join(dir, `discovery-before-clear-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.json`), fs.constants.COPYFILE_EXCL);
+  write({ ...state, jobs: [] });
+  return { removed };
+}
+
 export function deleteDiscovery(id) {
   if (!validId(id)) fail(400, 'Identifiant d’offre invalide.');
   const state = read(), length = state.jobs.length;

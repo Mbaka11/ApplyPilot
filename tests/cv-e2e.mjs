@@ -89,5 +89,26 @@ export async function testSelectedCv({ panel, site, sw, apiBase, out, check }) {
   const after = (await request(`/applications/${appId}`)).application;
   check('CV inspection preserves unsaved letter subject and instructions', (await panel.$eval('#letterSubject', element => element.value)) === initialSubject + ' — unsaved CV preview draft' && (await panel.$eval('#letterInstructions', element => element.value)) === 'Unsaved CV inspection instructions');
   check('CV actions preserve stored letter, status and the existing employer form', JSON.stringify(after.letter) === JSON.stringify(before.letter) && after.status === before.status && await site.evaluate(() => globalThis.cvPreviewSentinel === 'preserve form') && JSON.stringify(await site.$$eval('input, textarea, select', elements => elements.map(element => [element.id, element.value]))) === JSON.stringify(fieldsBefore));
+  await panel.click('[data-tab="profile"]');
+  await panel.waitForSelector('[data-profile-cv]');
+  const profileButtons = await panel.$$eval('[data-profile-cv]', elements => elements.map(element => ({ id: element.dataset.profileCv, url: element.dataset.openUrl, label: element.textContent })));
+  const { cvs } = await request('/cvs');
+  check('Profile offers a correctly bound PDF preview for every configured CV', profileButtons.length === cvs.length && profileButtons.every(button => cvs.some(cv => cv.id === button.id) && button.url.startsWith(`${apiBase}/cvs/${encodeURIComponent(button.id)}/pdf?`) && button.label === 'Preview CV'));
+  const profileTabIds = await sw.evaluate(() => chrome.tabs.query({}).then(tabs => tabs.map(tab => tab.id)));
+  // Profile may rerender after its asynchronous health refresh; click the current DOM node atomically.
+  const profilePreviewUrl = await panel.$eval('[data-profile-cv]', element => { const url = element.dataset.openUrl; element.click(); return url; });
+  let profilePreview;
+  for (let i = 0; i < 100 && !profilePreview; i++) {
+    profilePreview = await sw.evaluate(async ({ ids, url }) => (await chrome.tabs.query({})).find(tab => !ids.includes(tab.id) && tab.url === url), { ids: profileTabIds, url: profilePreviewUrl });
+    if (!profilePreview) await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  check('Profile preview opens the original PDF in a new tab', !!profilePreview);
+  if (profilePreview) await sw.evaluate(id => chrome.tabs.remove(id), profilePreview.id);
+  await panel.bringToFront();
+  await panel.select('#uiLanguage', 'fr');
+  check('Profile preview is translated into French', (await panel.$eval('[data-profile-cv]', element => element.textContent)) === 'Aperçu du CV');
+  await panel.select('#uiLanguage', 'en');
+  await panel.click('[data-tab="app"]');
+  check('Profile preview preserves unsaved application drafts and the employer form', (await panel.$eval('#letterSubject', element => element.value)) === initialSubject + ' — unsaved CV preview draft' && await site.evaluate(() => globalThis.cvPreviewSentinel === 'preserve form'));
   await panel.evaluate(() => { globalThis.fetch = globalThis.__cvOriginalFetch; navigator.clipboard.writeText = globalThis.__cvOriginalClipboard; });
 }

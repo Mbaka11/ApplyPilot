@@ -4,12 +4,12 @@ import { runGoogleSearch, searchDelay } from './runner.mjs';
 
 export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, toast, canStart, activateApplication }) {
   const state = { settings: null, jobs: [], loaded: false, dirty: false, loading: false, mutating: false, revision: 0, run: null, progress: null, message: '', messageValues: {}, tone: '', lastTabId: null,
-    filter: 'visible', kind: 'job', platform: 'all', source: 'all', text: '', sort: 'relevance', limit: 30,
+    filter: 'visible', kind: 'job', platform: 'all', source: 'all', text: '', sort: 'published-desc', limit: 30,
     draft: { links: '', title: '', company: '', location: '', employerUrl: '', description: '' }, detailsOpen: false, planOpen: false, settingsOpen: false, manualOpen: false };
   const busy = () => !!state.run || state.mutating || state.loading;
   const $ = selector => element.querySelector(selector);
   const label = source => esc(tr(source));
-  const button = (action, title, id = '', extra = '') => `<button type="button" class="btn ${extra}" data-search-action="${action}" ${id ? `data-search-id="${esc(id)}"` : ''} ${busy() && !['stop', 'viewTab'].includes(action) ? 'disabled' : ''}>${label(title)}</button>`;
+  const button = (action, title, id = '', extra = '') => `<button type="button" class="btn ${extra}" data-search-action="${action}" ${id ? `data-search-id="${esc(id)}"` : ''} ${busy() && !['stop', 'viewTab'].includes(action) || action === 'clear' && !state.jobs.length ? 'disabled' : ''}>${label(title)}</button>`;
   function feedback(message, tone = '', values = {}) { state.message = message; state.messageValues = values; state.tone = tone; renderProgress(); }
   function adopt(data, { settings = false } = {}) {
     state.jobs = data.jobs || [];
@@ -84,6 +84,7 @@ export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, 
       <div id="searchProgress" role="status" aria-live="polite"></div>
     </div>
     <div class="card"><h2>${label('Catalogue local')} <span id="searchCount"></span></h2>
+      <div class="row search-actions">${button('clear', 'Vider le catalogue', '', 'ghost danger')}</div>
       <div id="searchQuality" class="small muted"></div>
       ${select('searchKind', 'Type de lien', [['job', 'Offres identifiées'], ['unknown', 'Liens à vérifier'], ['listing', 'Pages de résultats'], ['all', 'Tous les liens']], state.kind)}
       <div class="search-filter-grid"><div>${select('searchPlatform', 'Plateforme', [['all', 'Toutes les plateformes'], ...Object.entries(PLATFORMS)], state.platform)}</div><div>${select('searchSource', 'Découverte', [['all', 'Toutes les provenances'], ['linkedin-public', 'LinkedIn public'], ['google', 'Google'], ['manual', 'Ajout manuel']], state.source)}</div></div>
@@ -165,6 +166,13 @@ export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, 
   function reset() { stop({ quiet: true }); ++state.revision; state.jobs = []; state.loaded = false; state.loading = false; state.mutating = false; render(); }
   const actions = {
     start: () => start('google'), startLinkedIn: () => start('linkedin-public'), stop, reload: load,
+    clear: async () => {
+      if (busy() || !state.jobs.length) return;
+      const ids = state.jobs.map(job => job.id);
+      if (!confirm(tr('Supprimer les {count} liens du catalogue, y compris les favoris et les liens masqués ? Une sauvegarde locale sera conservée. Les candidatures, CV, lettres et filtres de recherche ne seront pas supprimés.', { count: ids.length }))) return;
+      if (busy()) return;
+      if (await mutate('/search/clear', { method: 'POST', body: { confirm: true, ids } }, { message: 'Catalogue vidé. Les candidatures et les filtres de recherche sont conservés.' })) { state.limit = 30; render(); }
+    },
     saveSettings: () => mutate('/search/settings', { method: 'PUT', body: validateSettings(state.settings) }, { settings: true, message: 'Filtres enregistrés.' }),
     import: async () => {
       const { links, ...details } = state.draft;

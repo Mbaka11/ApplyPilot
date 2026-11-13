@@ -36,6 +36,8 @@ surfaces, and separates recognizable search/listing pages. Unrecognized URLs sta
   before importing a collected batch. Unknown URLs may be saved for manual review,
   but are not in the default job-only view.
 - Existing catalog rows are retained. Changing views is not a destructive cleanup.
+- The default sort is **publication date, newest first**. Unknown publication dates stay at the bottom; relevance and oldest-first sorting remain available.
+- **Clear catalog** removes every discovery, including saved/hidden links and results outside the current filters, only after explicit confirmation. Search settings and applications (including their CVs and cover letters) stay untouched. An exact private backup is saved under `data/backups/search/discovery-before-clear-*.json`. If links were added or removed since the displayed list was loaded, the server refuses the clear until you refresh and confirm again. New searches may rediscover cleared links.
 - URL classification does **not** verify whether a job exists, remains open, matches
   the term, offers remote work or accepts the candidate.
 - **Platform** describes destinations/aliases: LinkedIn, Indeed, employer, etc.
@@ -139,6 +141,7 @@ creates an application or submits a form.
 | POST | `/search/linkedin` | `{settings,index,acknowledgeExperimental:true}`; one public page, validated import, evidence and fresh catalog |
 | POST | `/search/import` | `{links,details?}`; manual links and optional single-job details |
 | PATCH | `/search/jobs/:id` | `{status:"new"\|"saved"\|"hidden"}` only |
+| POST | `/search/clear` | `{confirm:true,ids:[all IDs in the loaded catalog, regardless of filters]}`; clear every discovery after validating the complete catalog ID snapshot, with a private backup |
 | DELETE | `/search/jobs/:id` | Delete a discovery only |
 
 Settings: `{keywords,categories,scope,term,maxPages}`. Categories are `ai`, `dev`,
