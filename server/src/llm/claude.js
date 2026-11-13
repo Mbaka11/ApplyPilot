@@ -1,15 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
-import { DATA_DIR, normalizeLlm } from '../config.js';
+import { DATA_DIR, EFFORTS, normalizeLlm } from '../config.js';
 import { ensureDir } from '../util.js';
-import { activeRuns, cancelledError, identifier, killTree } from './common.js';
+import { activeRuns, cancelledError, findOnPath, identifier, killTree } from './common.js';
 import { schemaFor } from './schemas.js';
 
 // Claude Code CLI en mode headless (`claude -p`) : utilise la connexion de l'utilisateur (abonnement).
 // Jamais `--bare` : il force ANTHROPIC_API_KEY et ignore la connexion OAuth. Si ANTHROPIC_API_KEY est défini
 // dans l'environnement, le CLI facture l'API au lieu de l'abonnement.
-export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const SYSTEM_PROMPT = 'Tu es un assistant de redaction de candidatures. Reponds uniquement avec l\'objet JSON demande, sans texte autour, sans outil.';
 
 // Variables qui décrivent la session Claude Code *parente* : à ne pas transmettre au CLI enfant
@@ -21,27 +20,22 @@ export function claudeEnv(base = process.env) {
   return env;
 }
 
-function findOnPath(names) {
-  const dirs = (process.env.PATH || process.env.Path || '').split(path.delimiter).filter(Boolean);
-  for (const name of names) for (const dir of dirs) {
-    const file = path.join(dir, name);
-    try { if (fs.statSync(file).isFile()) return file; } catch { /* suivant */ }
-  }
-  return null;
-}
-
 /** Trouve comment lancer claude : commande configurée, sinon claude.exe puis claude.cmd (shell seulement pour .cmd). */
 export function resolveClaude(cfg) {
   const configured = normalizeLlm(cfg.llm).claude.command;
-  let file = configured ? path.resolve(configured) : findOnPath(process.platform === 'win32' ? ['claude.exe', 'claude.cmd'] : ['claude']);
+  // Un nom nu (« claude », « claude.exe ») se cherche dans le PATH ; seul un chemin est résolu depuis le dossier courant.
+  const bare = !configured || !/[\\/]/.test(configured);
+  const win = process.platform === 'win32';
+  const names = !configured ? (win ? ['claude.exe', 'claude.cmd'] : ['claude']) : win && !/\.\w+$/.test(configured) ? [`${configured}.exe`, `${configured}.cmd`] : [configured];
+  let file = bare ? findOnPath(names) : path.resolve(configured);
   if (!file) return { found: false, file: 'claude', args: [], shell: false, desc: 'claude (introuvable)' };
   if (/\.(c|m)?js$/i.test(file)) return { found: true, file: process.execPath, args: [file], shell: false, desc: file };
-  if (/\.(cmd|bat)$/i.test(file) && !configured) {
+  if (/\.(cmd|bat)$/i.test(file) && bare) {
     // Le wrapper npm lance claude.exe : on l'appelle directement (pas de shell, pas de souci de guillemets).
     const exe = path.join(path.dirname(file), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
     if (fs.existsSync(exe)) file = exe;
   }
-  return { found: true, file, args: [], shell: /\.(cmd|bat)$/i.test(file), desc: configured ? file : path.basename(file) };
+  return { found: true, file, args: [], shell: /\.(cmd|bat)$/i.test(file), desc: bare ? path.basename(file) : file };
 }
 
 const quoteForCmd = arg => `"${String(arg).replace(/"/g, '\\"')}"`;
@@ -132,13 +126,11 @@ export function run(prompt, { cfg, task = 'letter', schema, model, effort, timeo
   });
 }
 
-let versionCache = null;
-/** `claude --version`, mis en cache 60 s. */
-export function claudeVersion(cfg) {
-  const runner = resolveClaude(cfg);
-  const key = `${runner.file}|${runner.args.join(' ')}`;
-  if (versionCache && versionCache.key === key && Date.now() - versionCache.at < 60_000) return versionCache.value;
-  const value = new Promise(resolve => {
+// `claude --version` lance un processus : jamais sur le chemin d'une requête quand une valeur (même ancienne) existe.
+let versionCache = null; // { key, at, value, refreshing }
+const VERSION_TTL = 10 * 60_000, VERSION_RETRY = 30_000; // l'échec est revérifié plus vite (installation, connexion)
+function probeVersion(runner) {
+  return new Promise(resolve => {
     if (!runner.found) return resolve({ available: false, version: null });
     try {
       const [file, args] = spawnArgs(runner, ['--version']);
@@ -148,7 +140,20 @@ export function claudeVersion(cfg) {
       });
     } catch { resolve({ available: false, version: null }); }
   });
-  versionCache = { key, at: Date.now(), value };
-  return value;
+}
+/** Dernière version connue ; rafraîchie en arrière-plan quand elle a plus de 10 min, ou dès que le binaire change. */
+export async function claudeVersion(cfg, runner = resolveClaude(cfg)) {
+  const key = `${runner.file}|${runner.args.join(' ')}`;
+  const hit = versionCache?.key === key ? versionCache : null;
+  if (!hit) {
+    const entry = versionCache = { key, at: Date.now(), value: null, refreshing: null };
+    entry.value = await probeVersion(runner);
+    entry.at = Date.now();
+    return entry.value;
+  }
+  if (!hit.refreshing && Date.now() - hit.at >= (hit.value?.available ? VERSION_TTL : VERSION_RETRY)) {
+    hit.refreshing = probeVersion(runner).then(value => { hit.value = value; hit.at = Date.now(); }).finally(() => { hit.refreshing = null; });
+  }
+  return hit.value ?? probeVersion(runner);
 }
 export const resetClaudeVersionCache = () => { versionCache = null; };

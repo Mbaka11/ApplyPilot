@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { DATA_DIR, normalizeLlm } from '../config.js';
 import { ensureDir } from '../util.js';
-import { activeRuns, cancelledError, identifier, killTree } from './common.js';
+import { activeRuns, cancelledError, findOnPath, identifier, killTree } from './common.js';
 
 const piSettings = cfg => normalizeLlm(cfg.llm).pi;
 
@@ -40,6 +40,14 @@ export function resolvePi(cfg) {
     /* pas d'installation gérée : on tente le PATH */
   }
   return { file: 'pi', args: [], env: {}, shell: process.platform === 'win32', desc: 'pi (PATH)' };
+}
+
+/** pi est-il lançable ? Simple vérification de fichier (aucun appel au modèle). */
+export function piAvailable(cfg, runner = resolvePi(cfg)) {
+  try {
+    if (runner.file === 'pi') return !!findOnPath(process.platform === 'win32' ? ['pi.cmd', 'pi.exe', 'pi.bat'] : ['pi']);
+    return fs.statSync(runner.args[0] || runner.file).isFile();
+  } catch { return false; }
 }
 
 const THINKING = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);

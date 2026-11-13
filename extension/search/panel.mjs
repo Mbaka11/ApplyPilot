@@ -2,8 +2,8 @@ import { CATEGORIES, SCOPES, searchDefaults, validateSettings, buildSearchPlan, 
 import { PLATFORMS, catalogMeta, filterCatalog, sortCatalog } from './catalog.mjs';
 import { runGoogleSearch, searchDelay } from './runner.mjs';
 
-export function createSearchPanel({ element, onRunChange = () => {}, api, tr, esc, fmtDate, toast, canStart, activateApplication }) {
-  const state = { info: new Set(), settings: null, jobs: [], loaded: false, dirty: false, loading: false, mutating: false, revision: 0, run: null, progress: null, message: '', messageValues: {}, tone: '', lastTabId: null,
+export function createSearchPanel({ element, onRunChange = () => {}, api, tr, esc, fmtDate, toast, infoButton, infoBody, canStart, activateApplication }) {
+  const state = { settings: null, jobs: [], loaded: false, dirty: false, loading: false, mutating: false, revision: 0, run: null, progress: null, message: '', messageValues: {}, tone: '', lastTabId: null,
     filter: 'visible', kind: 'job', platform: 'all', source: 'all', text: '', sort: 'published-desc', limit: 30,
     draft: { links: '', title: '', company: '', location: '', employerUrl: '', description: '' }, detailsOpen: false, planOpen: false, settingsOpen: false, manualOpen: false };
   const busy = () => !!state.run || state.mutating || state.loading;
@@ -64,12 +64,10 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
     }
     const s = state.settings;
     const select = (id, title, options, value) => `<label for="${id}">${label(title)}</label><select id="${id}">${options.map(([key, name]) => `<option value="${key}" ${key === value ? 'selected' : ''}>${label(name)}</option>`).join('')}</select>`;
-    const info = (id, html) => `<button type="button" class="info-btn" data-search-info="${id}" aria-expanded="${state.info.has(id)}" aria-controls="${id}" aria-label="${label('Plus de détails')}">ⓘ</button>`;
-    const infoBox = (id, html) => `<div class="info-body${state.info.has(id) ? '' : ' hidden'}" id="${id}">${html}</div>`;
     element.innerHTML = `<div class="card"><div class="card-head"><h2>${label('Recherche de stages')}</h2><span class="badge warn">${label('LinkedIn expérimental')}</span></div>
       <div class="row search-actions">${button('start', 'Chercher sur Google', '', 'primary')}${button('startLinkedIn', 'LinkedIn · prototype')}</div>
-      <div class="row small muted search-hint"><span class="grow">${label('Des liens d’offres individuelles, avec leur plateforme et leur provenance. Aucune candidature créée automatiquement.')}</span>${info('info-search')}</div>
-      ${infoBox('info-search', `<p>${label('LinkedIn public : accès non officiel sans compte ni cookies. Requêtes limitées, arrêt au premier blocage. Les conditions LinkedIn restreignent l’automatisation.')}</p><p>${label('Pas de navigation dans tes formulaires. Garde le panneau ouvert ; Arrêter interrompt les requêtes suivantes et conserve les résultats déjà reçus.')}</p>`)}
+      <div class="row small muted search-hint"><span class="grow">${label('Des liens d’offres individuelles, avec leur plateforme et leur provenance. Aucune candidature créée automatiquement.')}</span>${infoButton('info-search')}</div>
+      ${infoBody('info-search', `<p>${label('LinkedIn public : accès non officiel sans compte ni cookies. Requêtes limitées, arrêt au premier blocage. Les conditions LinkedIn restreignent l’automatisation.')}</p><p>${label('Pas de navigation dans tes formulaires. Garde le panneau ouvert ; Arrêter interrompt les requêtes suivantes et conserve les résultats déjà reçus.')}</p>`)}
       <details id="searchSettingsDetails" ${state.settingsOpen ? 'open' : ''}><summary>${label('Filtres de recherche')}</summary>
         <form id="searchForm" class="stack"><fieldset ${busy() ? 'disabled' : ''}>
           <label for="searchKeywords">${label('Mots-clés de stage')}</label><input type="text" id="searchKeywords" data-search-setting="keywords" value="${esc(s.keywords)}" maxlength="200">
@@ -205,10 +203,5 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
   }
   element.addEventListener('input', input); element.addEventListener('change', input);
   element.addEventListener('submit', event => event.preventDefault());
-  element.addEventListener('click', event => {
-    const toggle = event.target.closest('[data-search-info]'); if (!toggle) return;
-    const id = toggle.dataset.searchInfo, box = element.querySelector('#' + id); if (!box) return;
-    const open = box.classList.toggle('hidden') === false; toggle.setAttribute('aria-expanded', String(open)); if (open) state.info.add(id); else state.info.delete(id);
-  });
   return { show: load, render, stop, reset, get running() { return !!state.run; }, get progress() { return state.progress; } };
 }

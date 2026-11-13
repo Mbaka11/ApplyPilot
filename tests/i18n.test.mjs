@@ -100,4 +100,14 @@ check('shared translation script is safe to reinject (no top-level lexical colli
   const keys = [...source.matchAll(/^  '(.*?)':/gm)].map((m) => m[1]);
   assert.equal(new Set(keys).size, keys.length, 'Duplicate dictionary keys');
 });
+{
+  const { modelLabel } = await import('../extension/sidepanel/model-label.mjs');
+  check('modelLabel: Sonnet 5.5, Opus 4 (date suffix ignored), Opus 4.1, unknown ids unchanged', () => {
+    assert.equal(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
+    assert.equal(modelLabel('claude-opus-4-20250514'), 'Opus 4');
+    assert.equal(modelLabel('claude-opus-4-1-20250805'), 'Opus 4.1');
+    assert.equal(modelLabel('claude-haiku-4-5'), 'Haiku 4.5');
+    assert.equal(modelLabel('fixture/x'), 'fixture/x');
+  });
+}
 console.log(`\n${checks} localization checks passed.`);

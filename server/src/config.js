@@ -26,7 +26,7 @@ export const DEFAULTS = {
   styleDir: 'data/style',
   // Réglages détaillés (claude / pi) : voir normalizeLlm().
   llm: {
-    provider: '', // vide = claude si le binaire est trouvé, sinon pi
+    provider: '', // vide = pi si des réglages pi sont présents, sinon claude si le binaire est trouvé, sinon pi
     timeoutSeconds: 300,
   },
   chrome: { executablePath: '' },
@@ -49,15 +49,23 @@ export const DEFAULTS = {
   },
 };
 
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const text = (v, d) => (typeof v === 'string' ? v.trim() : v == null ? d : String(v).trim());
 
-/** Normalise llm.* : nouvelle forme (provider/claude/pi) ou anciennes clés plates (lues comme réglages pi). Idempotent. */
+const normalizedLlm = new WeakSet();
+const filled = v => v != null && String(v).trim() !== '';
+
+/**
+ * Normalise llm.* : nouvelle forme (provider/claude/pi) ou anciennes clés plates (lues comme réglages pi). Idempotent :
+ * un objet déjà normalisé (par getConfig) est renvoyé tel quel. `piConfigured` = l'utilisateur a réglé pi lui-même
+ * (clés plates explicites ou llm.pi.* modifié) : sans llm.provider, on reste alors sur pi.
+ */
 export function normalizeLlm(llm = {}) {
+  if (normalizedLlm.has(llm)) return llm;
   const claude = llm.claude || {}, pi = llm.pi || {}, effort = claude.effort || {};
   const level = (v) => (EFFORTS.includes(v) ? v : 'medium');
   const provider = text(llm.provider, '').toLowerCase();
-  return {
+  const out = {
     provider: ['claude', 'pi'].includes(provider) ? provider : '',
     timeoutSeconds: Number(llm.timeoutSeconds) || 300,
     claude: {
@@ -72,6 +80,11 @@ export function normalizeLlm(llm = {}) {
       answersThinking: text(pi.answersThinking ?? llm.answersThinking, 'low'),
     },
   };
+  out.piConfigured = llm.piConfigured === true
+    || ['command', 'model', 'letterThinking', 'answersThinking'].some(k => filled(llm[k]))
+    || out.pi.command !== 'pi' || out.pi.model !== '' || out.pi.letterThinking !== 'medium' || out.pi.answersThinking !== 'low';
+  normalizedLlm.add(out);
+  return out;
 }
 
 const cache = new Map();

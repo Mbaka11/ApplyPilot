@@ -393,6 +393,15 @@ async function main() {
     await panel.keyboard.press('KeyA');
     await panel.keyboard.up('Control');
     await panel.type('#letterSubject', 'Candidature modifiée');
+    const refreshed = await panel.evaluate(async () => {
+      const { refreshPage } = await import('./views/application.mjs');
+      const input = document.querySelector('#letterSubject'), details = document.querySelector('#letterCard details');
+      details.open = true; input.focus(); input.setSelectionRange(4, 9);
+      await refreshPage();
+      const now = document.querySelector('#letterSubject');
+      return { sameNode: now === input, focused: document.activeElement === now, start: now.selectionStart, end: now.selectionEnd, value: now.value, detailsOpen: document.querySelector('#letterCard details').open };
+    });
+    check('page refresh keeps the letter fields untouched (focus, caret, typed text, open instructions)', refreshed.focused && refreshed.start === 4 && refreshed.end === 9 && refreshed.value === 'Candidature modifiée' && refreshed.detailsOpen, JSON.stringify(refreshed));
     await panel.click('[data-action="saveLetter"]');
     await panel.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('PDF mis'), { timeout: 30000 });
     const saved = (await fetch(`${apiBase}/applications/${appId}`).then((r) => r.json())).application.letter;

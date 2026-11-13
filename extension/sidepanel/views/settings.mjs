@@ -17,7 +17,7 @@ function aiBlock() {
     [tr('Disponibilité'), llm.available ? tr(llm.version ? 'Disponible · v{version}' : 'Disponible', { version: llm.version }) : tr('Introuvable')],
   ];
   return `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
-    ${!llm.available ? `<div class="small text-warn">${tr(claude ? 'Claude Code est introuvable : installe-le et connecte-toi avec « claude », ou choisis pi.' : 'pi est introuvable : installe-le ou configure llm.command.')}</div>` : ''}
+    ${!llm.available ? `<div class="small text-warn">${tr(claude ? 'Claude Code est introuvable : installe-le et connecte-toi avec « claude », ou choisis pi.' : 'pi est introuvable : installe-le ou configure llm.pi.command.')}</div>` : ''}
     ${claude && llm.apiKeyInEnv ? `<div class="small text-warn">${tr('ANTHROPIC_API_KEY est définie : l’API sera facturée au lieu de ton abonnement.')}</div>` : ''}
     <div class="row small muted"><span class="grow">${tr('Lecture seule. Pour changer ces réglages, modifie config.yaml puis redémarre le serveur.')}</span>${infoButton('info-llm-config')}</div>
     ${infoBody('info-llm-config', `<p>${tr('Dans config.yaml, section llm : provider (claude ou pi), model et effort. L’écriture depuis le panneau est volontairement absente : elle effacerait les commentaires du fichier.')}</p><pre class="code">llm:\n  provider: claude\n  claude:\n    model: claude-sonnet-5-5\n    effort:\n      letter: medium</pre>`)}`;

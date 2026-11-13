@@ -60,7 +60,7 @@ Requirements:
 - **[Claude Code](https://claude.com/claude-code)** installed and signed in (run `claude`, then `/login`). A recent version is needed for `--effort` and `--safe-mode`; 0.8.0 was verified with 2.1.323/2.1.325.
 - Optional: **[pi](https://pi.dev)**, authenticated with a model provider, if you set `llm.provider: pi`
 
-If `ANTHROPIC_API_KEY` is set in the environment that starts the server, the Claude CLI bills the API instead of your subscription. Without an explicit `llm.provider`, ApplyPilot uses Claude when `claude` is found and pi otherwise; an older `config.yaml` therefore switches to Claude unless it sets `provider: pi`.
+If `ANTHROPIC_API_KEY` is set in the environment that starts the server, the Claude CLI bills the API instead of your subscription. Without an explicit `llm.provider`, an older `config.yaml` that configures pi (`llm.command`, `llm.model`, `letterThinking`, `answersThinking`) stays on pi; otherwise ApplyPilot uses Claude when `claude` is found and pi when it is not. Set `llm.provider: claude` to switch.
 
 1. **Clone the repository.**
    ```sh
@@ -199,7 +199,7 @@ Sites vary. Unusual widgets can remain incomplete and need manual input. Workday
 | Key | Purpose |
 |---|---|
 | `cvDir`, `cvs[]` | CV folder; language, display name and keywords for each variant |
-| `llm.provider` | `claude` or `pi`; blank = claude when the CLI is found, else pi |
+| `llm.provider` | `claude` or `pi`; blank = pi if pi settings are present, else claude when the CLI is found, else pi |
 | `llm.claude.command`, `.model`, `.effort.letter/answers/tailor` | Claude CLI path (blank = PATH), model (default `claude-sonnet-5-5`) and requested effort per task (default `medium`) |
 | `llm.pi.command`, `.model`, `.letterThinking`, `.answersThinking` | pi settings; the former flat `llm.command/model/letterThinking` keys are still read |
 | `letter.paper`, `letter.showHeader` | Letter/A4 paper and contact header |

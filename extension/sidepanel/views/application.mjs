@@ -17,7 +17,7 @@ import { switchTab } from './shell.mjs';
 export const otherCvBusy = () => !S.health || S.cvBusy || S.appBusy || S.switching || S.fillBusy || S.letterBusy;
 export const cvSelectionLocked = () => otherCvBusy() || cvTailor.busy();
 export const cvInspector = createCvInspector({ api, tr, esc, toast, canAct: () => !cvSelectionLocked(), locale: () => S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA' });
-export const cvTailor = createCvTailor({ api, tr, esc, toast, canAct: () => !otherCvBusy() && !S.fillRun, locale: () => S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA',
+export const cvTailor = createCvTailor({ api, tr, esc, toast, infoButton, infoBody, canAct: () => !otherCvBusy() && !S.fillRun, locale: () => S.uiLanguage === 'fr' ? 'fr-CA' : 'en-CA',
   onChange: application => { if (S.app?.id !== application.id) return; S.app = application; renderAppCard(); loadApps().catch(() => {}); } });
 export function syncCvControls() {
   const locked = cvSelectionLocked();

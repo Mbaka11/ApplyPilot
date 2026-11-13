@@ -8,30 +8,39 @@ export const cancelAllPi = cancelAll; // ancien nom
 export const { runPi, resolvePi } = pi;
 export const runClaude = claude.run;
 
-/** Fournisseur actif : llm.provider explicite, sinon claude si le binaire est trouvé, sinon pi. */
+/** Fournisseur actif : llm.provider explicite ; sinon pi si l'utilisateur a réglé pi (anciennes clés plates, llm.pi.*) ; sinon claude si le binaire est trouvé, sinon pi. */
 export function resolveProvider(cfg) {
-  const explicit = normalizeLlm(cfg.llm).provider;
-  if (explicit) return explicit;
+  const llm = normalizeLlm(cfg.llm);
+  if (llm.provider) return llm.provider;
+  if (llm.piConfigured) return 'pi';
   return claude.resolveClaude(cfg).found ? 'claude' : 'pi';
 }
 
 /** Réglages affichables (modèle demandé + effort) pour la lettre et les réponses, selon le fournisseur. */
-export function generationSettings(cfg) {
-  if (resolveProvider(cfg) === 'pi') return pi.generationSettings(cfg);
+export function generationSettings(cfg, provider = resolveProvider(cfg)) {
+  if (provider === 'pi') return pi.generationSettings(cfg);
   return { letter: claude.claudeSettings(cfg, 'letter'), answers: claude.claudeSettings(cfg, 'answers') };
 }
 
-/** Infos pour /health : { provider, available, version, model, effort }. */
+/** Infos pour /health : { provider, runner, available, version, model, effort, apiKeyInEnv }. Résout le fournisseur et le binaire une seule fois. */
 export async function llmHealth(cfg) {
   const provider = resolveProvider(cfg);
   const settings = normalizeLlm(cfg.llm);
   if (provider === 'pi') {
-    const g = pi.generationSettings(cfg);
-    return { provider, available: true, version: null, model: g.letter.requestedModel, effort: { letter: g.letter.requestedThinking, answers: g.answers.requestedThinking, tailor: g.letter.requestedThinking },
+    const runner = pi.resolvePi(cfg), g = pi.generationSettings(cfg);
+    return { provider, runner: runner.desc, available: pi.piAvailable(cfg, runner), version: null, model: g.letter.requestedModel, effort: { letter: g.letter.requestedThinking, answers: g.answers.requestedThinking, tailor: g.letter.requestedThinking },
       apiKeyInEnv: false };
   }
-  const v = await claude.claudeVersion(cfg);
-  return { provider, available: v.available, version: v.version, model: settings.claude.model, effort: settings.claude.effort, apiKeyInEnv: !!process.env.ANTHROPIC_API_KEY };
+  const runner = claude.resolveClaude(cfg);
+  const v = await claude.claudeVersion(cfg, runner);
+  return { provider, runner: runner.desc, available: v.available, version: v.version, model: settings.claude.model, effort: settings.claude.effort, apiKeyInEnv: !!process.env.ANTHROPIC_API_KEY };
+}
+
+/** Une ligne lisible du fournisseur actif, pour le journal de démarrage et la page d'accueil : « claude (claude.exe) · claude-sonnet-5-5 » ou « pi (…) ». */
+export function providerSummary(cfg) {
+  const provider = resolveProvider(cfg);
+  if (provider === 'pi') return `pi (${pi.resolvePi(cfg).desc})`;
+  return `claude (${claude.resolveClaude(cfg).desc}) · ${normalizeLlm(cfg.llm).claude.model}`;
 }
 
 /** Un appel brut au fournisseur actif : { text, data?, ms, runner, generation }. */

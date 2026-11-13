@@ -24,7 +24,7 @@ All published changes are tracked here. ApplyPilot uses Semantic Versioning; `0.
 - The previous `llm.command`, `llm.model`, `llm.letterThinking` and `llm.answersThinking` keys are still read as pi settings when `llm.pi` is absent.
 
 ### Upgrade notes
-- **Provider auto-selection.** Without an explicit `llm.provider`, ApplyPilot uses Claude when the `claude` binary is found and pi otherwise. A `config.yaml` written for 0.7 or earlier therefore switches to Claude after the update if Claude Code is installed. Set `llm.provider: pi` to stay on pi.
+- **Provider auto-selection.** Without an explicit `llm.provider`, a `config.yaml` that already configures pi (flat keys `llm.command`, `llm.model`, `llm.letterThinking` or `llm.answersThinking`, or a customised `llm.pi.*`) stays on pi. Claude is chosen automatically only when no pi setting is present and the `claude` binary is found. Set `llm.provider: claude` to switch deliberately.
 - **Claude Code required for the Claude provider.** Install it, run `claude` once and sign in with `/login`. It needs a version that supports `--effort` and `--safe-mode`; 0.8.0 was verified with Claude Code 2.1.323 and 2.1.325. No `npm ci` is needed (no new dependency); restart the server and reload the extension.
 - **Billing.** If `ANTHROPIC_API_KEY` is set in the environment that starts the server, the Claude CLI bills the API instead of your subscription. Unset it to use the subscription.
 - Letters already generated keep their original attribution. pi remains supported and optional.

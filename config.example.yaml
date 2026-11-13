@@ -32,7 +32,9 @@ cvs:
 styleDir: data/style
 
 llm:
-  # claude | pi. Blank = claude when the Claude Code CLI is found, otherwise pi.
+  # claude | pi. Blank = pi if you configured pi yourself (the former flat llm.command / model /
+  # letterThinking / answersThinking keys, or a customised llm.pi.*); otherwise claude when the
+  # Claude Code CLI is found, else pi.
   provider: claude
   timeoutSeconds: 300 # The panel separately limits pending autofill answers to 90 seconds.
   # Claude Code CLI in headless mode (no tools, no session, no CLAUDE.md/skills/hooks/MCP).

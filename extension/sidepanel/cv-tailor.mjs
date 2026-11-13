@@ -1,7 +1,7 @@
 // Per-posting CV copy: explicit request, before/after review, opt-in use for forms. One application at a time.
-export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onChange = () => {}, ask = text => confirm(text), openTab = url => chrome.tabs.create({ url }), locale = () => 'en-CA' }) {
+export function createCvTailor({ api, tr, esc, toast, infoButton, infoBody, canAct = () => true, onChange = () => {}, ask = text => confirm(text), openTab = url => chrome.tabs.create({ url }), locale = () => 'en-CA' }) {
   let context = null, element = null, controller = null, revision = 0;
-  let report = null, loading = false, running = false, error = '', disabled = false, expanded = false, infoOpen = false;
+  let report = null, loading = false, running = false, error = '', disabled = false, expanded = false;
   const same = (captured, token) => context?.key === captured.key && revision === token;
   const stale = value => value && (value.baseChanged || value.jobChanged || value.cvChanged);
   const list = items => esc((items || []).join(', '));
@@ -40,7 +40,7 @@ export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onCha
         <label class="small" style="display:block;margin:6px 0"><input type="checkbox" data-ct-use ${context.application.cvTailored.useForForms ? 'checked' : ''} ${locked || old ? 'disabled' : ''}> ${esc(tr('Utiliser ce CV adapté pour les formulaires de cette candidature'))}</label>
         <div class="row">${button('preview', 'Aperçu du CV adapté')}${button('tailor', 'Régénérer', '', context.application.status === 'soumise')}${button('discard', 'Supprimer')}</div>`;
     }
-    element.innerHTML = `<div class="cv-tailor"><div class="cv-tailor-head"><strong>${esc(tr('CV adapté à l’offre'))}</strong><button type="button" class="info-btn" data-ct-info aria-expanded="${infoOpen}" aria-label="${esc(tr('Plus de détails'))}">ⓘ</button></div><div class="info-body" ${infoOpen ? '' : 'hidden'}>${esc(tr('Modifie seulement « À propos » et l’ordre des compétences, à partir de tes faits. Ton CV d’origine n’est pas touché.'))}</div>${body}<div class="small ${error && report ? 'cv-file-error' : 'muted'}" role="status" aria-live="polite">${report ? esc(tr(error)) : ''}</div></div>`;
+    element.innerHTML = `<div class="cv-tailor"><div class="cv-tailor-head"><strong>${esc(tr('CV adapté à l’offre'))}</strong>${infoButton('info-cv-tailor')}</div>${infoBody('info-cv-tailor', esc(tr('Modifie seulement « À propos » et l’ordre des compétences, à partir de tes faits. Ton CV d’origine n’est pas touché.')))}${body}<div class="small ${error && report ? 'cv-file-error' : 'muted'}" role="status" aria-live="polite">${report ? esc(tr(error)) : ''}</div></div>`;
     element.querySelector('details')?.addEventListener('toggle', event => { expanded = event.target.open; });
   }
 
@@ -116,7 +116,6 @@ export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onCha
     if (reload) { controller?.abort(); ++revision; report = null; loading = false; running = false; error = ''; expanded = false; }
     context = { ...next, key, loadKey }; element = next.element; disabled = !!next.disabled;
     element.onclick = event => {
-      if (event.target.closest('[data-ct-info]')) { infoOpen = !infoOpen; render(); return; }
       const target = event.target.closest('[data-ct-action]');
       if (!target || target.disabled) return;
       event.preventDefault();

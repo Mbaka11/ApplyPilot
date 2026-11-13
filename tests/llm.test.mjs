@@ -14,7 +14,7 @@ Object.assign(process.env, { CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'parent-se
 process.env.PI_CODING_AGENT_DIR = path.join(OUT, 'fake-agent');
 fs.mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 fs.writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, 'settings.json'), JSON.stringify({ defaultProvider: 'fixture', defaultModel: 'default-test', unrelated: 'PRIVATE_SETTINGS_CANARY' }));
-const { runPi, askJson, cancelAllPi, cancelAll, generationSettings, resolveProvider, runClaude } = await import('../server/src/llm.js');
+const { runPi, askJson, cancelAllPi, cancelAll, generationSettings, resolveProvider, runClaude, llmHealth } = await import('../server/src/llm.js');
 const { claudeArgs, claudeEnv, resolveClaude } = await import('../server/src/llm/claude.js');
 const { normalizeLlm } = await import('../server/src/config.js');
 const cfg = { llm: { provider: 'pi', command: path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs'), model: 'fixture/requested', letterThinking: 'medium', answersThinking: 'low' } };
@@ -106,6 +106,24 @@ try {
   check('claude defaults: model, medium effort per task, empty command', legacy.claude.model === 'claude-sonnet-5-5' && legacy.claude.effort.tailor === 'medium' && legacy.claude.command === '' && legacy.provider === '');
   check('new pi.* keys override legacy ones and normalization is idempotent', normalizeLlm({ command: 'old', pi: { command: 'new' } }).pi.command === 'new' && JSON.stringify(normalizeLlm(legacy)) === JSON.stringify(legacy));
   check('invalid effort falls back to medium', normalizeLlm({ claude: { effort: { letter: 'bogus' } } }).claude.effort.letter === 'medium');
+
+  // legacy configs stay on pi; bare command names are PATH lookups; health checks pi without a model call
+  check('legacy flat pi keys keep pi even when claude is installed; explicit provider still wins', resolveProvider({ llm: { command: FAKE, model: 'a/b', claude: { command: FAKE } } }) === 'pi' && resolveProvider({ llm: { letterThinking: 'high', claude: { command: FAKE } } }) === 'pi' && resolveProvider({ llm: { provider: 'claude', command: 'x', claude: { command: FAKE } } }) === 'claude');
+  check('llm.pi.* customised also keeps pi; untouched defaults do not', resolveProvider({ llm: { pi: { model: 'a/b' }, claude: { command: FAKE } } }) === 'pi' && resolveProvider({ llm: { pi: { command: 'pi', model: '', letterThinking: 'medium', answersThinking: 'low' }, claude: { command: FAKE } } }) === 'claude');
+  const norm = normalizeLlm({ command: 'mypi' });
+  check('normalization is idempotent and a normalized object is reused as is', norm.piConfigured === true && normalizeLlm(norm) === norm && normalizeLlm(JSON.parse(JSON.stringify(norm))).piConfigured === true);
+  const bin = path.join(OUT, 'bin'); fs.mkdirSync(bin, { recursive: true });
+  const exeName = process.platform === 'win32' ? 'claude-bare.exe' : 'claude-bare';
+  fs.writeFileSync(path.join(bin, exeName), '');
+  const pathBefore = process.env.PATH; process.env.PATH = `${bin}${path.delimiter}${pathBefore}`;
+  const bare = resolveClaude({ llm: { claude: { command: exeName } } });
+  const bareNoExt = resolveClaude({ llm: { claude: { command: 'claude-bare' } } });
+  process.env.PATH = pathBefore;
+  check('a bare configured command is looked up on PATH, not resolved against the working directory', bare.found && bare.file === path.join(bin, exeName) && bareNoExt.found && bareNoExt.file === path.join(bin, exeName));
+  check('a bare command missing from PATH is reported as not found (no <cwd>/name)', resolveClaude({ llm: { claude: { command: 'claude-definitely-missing' } } }).found === false);
+  const piOk = await llmHealth({ llm: { provider: 'pi', command: path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs') } });
+  const piMissing = await llmHealth({ llm: { provider: 'pi', pi: { command: path.join(OUT, 'no-such-pi.exe') } } });
+  check('pi health checks that pi resolves (no model call)', piOk.provider === 'pi' && piOk.available === true && piMissing.available === false);
 
   // exact flags
   const args = claudeArgs({ model: 'm', effort: 'low', schema: { type: 'object' } });

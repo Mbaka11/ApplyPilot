@@ -1,7 +1,7 @@
 // Remplissage du formulaire : exécution annulable, documents SuccessFactors, mémoire, diagnostic.
 import { createFormDiagnostic, downloadFormDiagnostic } from '../form-diagnostic.mjs';
 import { S, VERSION } from '../state.mjs';
-import { $, esc, tr, toast, infoButton, infoBody } from '../ui.mjs';
+import { $, esc, tr, toast, paint, infoButton, infoBody } from '../ui.mjs';
 import { api, loadApps } from '../api.mjs';
 import { activeTab, scriptable, exec, runInTab } from '../tabs.mjs';
 import { renderPage, renderAppCard, renderApp, patchApp, syncCvControls } from './application.mjs';
@@ -278,7 +278,7 @@ export function renderFill() {
   const el = $('#fillCard');
   if (S.fillBusy) {
     // « Arrêter » vit dans la barre d’action ; ici seulement la progression.
-    el.innerHTML = `<div class="block"><div class="busy" role="status"><span class="spinner" aria-hidden="true"></span><span>${esc(tr(S.fillPhase))}</span></div></div>`;
+    paint(el, `<div class="block"><div class="busy" role="status"><span class="spinner" aria-hidden="true"></span><span>${esc(tr(S.fillPhase))}</span></div></div>`);
     renderStepper();
     renderSubmit();
     return;
@@ -330,7 +330,7 @@ export function renderFill() {
     ? `<div class="row"><button type="button" class="btn" data-action="prepareDocuments" ${S.diagnosticBusy ? 'disabled' : ''}>${tr('Préparer et joindre CV + lettre')}</button>${infoButton('info-documents')}</div>
       ${infoBody('info-documents', tr('Génère la lettre manquante et son PDF, puis joint les documents sans soumettre. Aucun remplacement automatique.'))}`
     : '';
-  el.innerHTML = `<div class="block">${body}${documents}${options}</div>`;
+  paint(el, `<div class="block">${body}${documents}${options}</div>`);
   renderStepper();
   renderSubmit();
 }

@@ -632,6 +632,7 @@ const EN = {
   "Le CV adapté est périmé : régénère-le avant de l’utiliser.": "The tailored CV is out of date: regenerate it before using it.",
   "Ce CV n’a pas de source LaTeX : adaptation impossible.": "This CV has no LaTeX source: it cannot be tailored.",
   // 0.8.0 panel redesign
+  'Coût estimé au tarif API : {cost}. Avec une connexion par abonnement, ce n’est pas un montant facturé.': 'Estimated cost at API rates: {cost}. With a subscription login this is not an amount you are charged.',
   'Plus de détails': 'More details',
   'Plus d’actions': 'More actions',
   'Compris': 'Got it',
@@ -680,7 +681,7 @@ const EN = {
   'Introuvable': 'Not found',
   'Redémarre le serveur ApplyPilot pour afficher le fournisseur IA.': 'Restart the ApplyPilot server to show the AI provider.',
   'Claude Code est introuvable : installe-le et connecte-toi avec « claude », ou choisis pi.': 'Claude Code was not found: install it and sign in with “claude”, or choose pi.',
-  'pi est introuvable : installe-le ou configure llm.command.': 'pi was not found: install it or set llm.command.',
+  'pi est introuvable : installe-le ou configure llm.pi.command.': 'pi was not found: install it or set llm.pi.command.',
   'ANTHROPIC_API_KEY est définie : l’API sera facturée au lieu de ton abonnement.': 'ANTHROPIC_API_KEY is set: the API will be billed instead of your subscription.',
   'Lecture seule. Pour changer ces réglages, modifie config.yaml puis redémarre le serveur.': 'Read-only. To change these settings, edit config.yaml and restart the server.',
   'Dans config.yaml, section llm : provider (claude ou pi), model et effort. L’écriture depuis le panneau est volontairement absente : elle effacerait les commentaires du fichier.': 'In config.yaml, section llm: provider (claude or pi), model and effort. Writing from the panel is deliberately absent: it would erase the file’s comments.',
