@@ -46,12 +46,28 @@ export function sortCatalog(jobs, order = 'relevance') {
     return order === 'published-asc' ? left - right : right - left;
   });
 }
-export function filterCatalog(jobs, { status = 'visible', kind = 'job', platform = 'all', source = 'all', text = '' } = {}) {
+// Location groups, from the displayed location first, then the title/snippet. A job may belong to several
+// (e.g. Montréal and remote); 'canada' covers every Canadian place, Montréal and Toronto included.
+export const LOCATIONS = { montreal: 'Montréal', toronto: 'Toronto', canada: 'Canada (partout)', usa: 'États-Unis', remote: 'Télétravail', unknown: 'Lieu inconnu' };
+const PLACES = {
+  montreal: /\b(montreal|laval|longueuil|brossard|saint-laurent|westmount)\b/,
+  toronto: /\b(toronto|mississauga|markham|richmond hill|brampton|vaughan|gta)\b/,
+  canada: /\b(canada|canadian|quebec|ontario|ottawa|vancouver|calgary|edmonton|winnipeg|halifax|waterloo|kitchener|sherbrooke|trois-rivieres|british columbia|alberta|manitoba|nova scotia)\b|,\s*(qc|on|bc|ab|ns|mb)\b/,
+  usa: /\b(united states|usa|u\.s\.|etats-unis|new york|san francisco|boston|seattle|chicago|austin|los angeles|california|texas|massachusetts|washington dc|silicon valley)\b|,\s*(ny|ma|wa|tx|il|dc)\b/,
+  remote: /\b(remote|teletravail|work from home|a distance|hybrid[e]?)\b/,
+};
+export function jobLocations(job) {
+  const text = normal([job.location, job.title, job.snippet].filter(Boolean).join(' | '));
+  const found = Object.keys(PLACES).filter(key => PLACES[key].test(text));
+  if (found.includes('montreal') || found.includes('toronto')) found.push('canada');
+  return found.length ? [...new Set(found)] : ['unknown'];
+}
+export function filterCatalog(jobs, { status = 'visible', kind = 'job', platform = 'all', source = 'all', text = '', location = 'all' } = {}) {
   const needle = normal(text);
   return jobs.filter(job => {
     const meta = catalogMeta(job);
     return (status === 'all' || (status === 'visible' ? job.status !== 'hidden' : job.status === status)) &&
       (kind === 'all' || meta.kind === kind) && (platform === 'all' || meta.platforms.includes(platform)) &&
-      (source === 'all' || meta.discoveryMethods.includes(source)) && (!needle || normal(`${job.title} ${job.company} ${job.location}`).includes(needle));
+      (source === 'all' || meta.discoveryMethods.includes(source)) && (location === 'all' || jobLocations(job).includes(location)) && (!needle || normal(`${job.title} ${job.company} ${job.location}`).includes(needle));
   });
 }

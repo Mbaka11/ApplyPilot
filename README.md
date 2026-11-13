@@ -101,6 +101,7 @@ Open **Search**, review the internship keywords, AI/software/data/consulting dom
 - **Stop search** works from every panel tab. Keep the panel open while searching; closing it also stops the run. Completed catalog batches remain saved, and the search tab is left open for inspection.
 - **LinkedIn · prototype** requests anonymous public HTML through the local server and displays parsed cards in the panel. It is undocumented, blocked in the latest live test, and subject to LinkedIn's automation restrictions. No cookies, accounts, browser attachment, redirects or retries are used. Manual browsing/import remains available separately.
 - The default catalog view shows **identified job links** rather than listing pages. Known aggregator listings are skipped during Google collection; old listing/unknown entries remain accessible without deletion.
+- Filter by **Location** (Montréal, Toronto, Canada anywhere, United States, remote or unknown), inferred from each listing's location, title and snippet; listings can match several groups.
 - Filter **Platform** separately from **Discovery method**: a Google-found LinkedIn URL is not evidence of direct LinkedIn collection.
 - Save, hide, restore, filter or delete catalog entries without creating applications. To apply, explicitly open the employer posting and use **Analyze this posting**.
 - **Sort by** relevance or publication date (newest/oldest first). Publication dates are mainly available for public LinkedIn results; undated offers stay at the bottom in both date orders, without substituting discovery dates.

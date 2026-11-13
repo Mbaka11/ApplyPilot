@@ -4,7 +4,12 @@ All published changes are tracked here. ApplyPilot uses Semantic Versioning; `0.
 
 
 
-## [0.8.0] — Unreleased local update
+## [Unreleased]
+
+### Added
+- Search: a **Location** filter for saved listings (Montréal, Toronto, Canada anywhere, United States, remote, unknown location), derived from the displayed location, title and snippet. A listing can belong to several groups; Canada includes Montréal and Toronto.
+
+## [0.8.0] — 2026-11-13
 
 0.7.0 was never published, so its section below is still unreleased and ships together with 0.8.0. The latest public release remains 0.6.0.
 

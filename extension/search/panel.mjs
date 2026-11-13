@@ -1,10 +1,10 @@
 import { CATEGORIES, SCOPES, searchDefaults, validateSettings, buildSearchPlan, buildLinkedInPlan, linkedinSearchUrl, externalJobUrl, isLinkedIn } from './core.mjs';
-import { PLATFORMS, catalogMeta, filterCatalog, sortCatalog } from './catalog.mjs';
+import { PLATFORMS, LOCATIONS, catalogMeta, filterCatalog, sortCatalog } from './catalog.mjs';
 import { runGoogleSearch, searchDelay } from './runner.mjs';
 
 export function createSearchPanel({ element, onRunChange = () => {}, api, tr, esc, fmtDate, toast, infoButton, infoBody, canStart, activateApplication }) {
   const state = { settings: null, jobs: [], loaded: false, dirty: false, loading: false, mutating: false, revision: 0, run: null, progress: null, message: '', messageValues: {}, tone: '', lastTabId: null,
-    filter: 'visible', kind: 'job', platform: 'all', source: 'all', text: '', sort: 'published-desc', limit: 30,
+    filter: 'visible', kind: 'job', platform: 'all', source: 'all', location: 'all', text: '', sort: 'published-desc', limit: 30,
     draft: { links: '', title: '', company: '', location: '', employerUrl: '', description: '' }, detailsOpen: false, planOpen: false, settingsOpen: false, manualOpen: false };
   const busy = () => !!state.run || state.mutating || state.loading;
   const $ = selector => element.querySelector(selector);
@@ -33,7 +33,7 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
   }
   function renderCatalog() {
     if (!$('#searchJobs')) return;
-    const jobs = sortCatalog(filterCatalog(state.jobs, { status: state.filter, kind: state.kind, platform: state.platform, source: state.source, text: state.text }), state.sort);
+    const jobs = sortCatalog(filterCatalog(state.jobs, { status: state.filter, kind: state.kind, platform: state.platform, source: state.source, location: state.location, text: state.text }), state.sort);
     const counts = { job: 0, unknown: 0, listing: 0 };
     state.jobs.forEach(job => counts[catalogMeta(job).kind]++);
     $('#searchCount').textContent = tr('{shown} / {total} liens', { shown: jobs.length, total: state.jobs.length });
@@ -87,6 +87,7 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
       <div id="searchQuality" class="small muted"></div>
       ${select('searchKind', 'Type de lien', [['job', 'Offres identifiées'], ['unknown', 'Liens à vérifier'], ['listing', 'Pages de résultats'], ['all', 'Tous les liens']], state.kind)}
       <div class="search-filter-grid"><div>${select('searchPlatform', 'Plateforme', [['all', 'Toutes les plateformes'], ...Object.entries(PLATFORMS)], state.platform)}</div><div>${select('searchSource', 'Découverte', [['all', 'Toutes les provenances'], ['linkedin-public', 'LinkedIn public'], ['google', 'Google'], ['manual', 'Ajout manuel']], state.source)}</div></div>
+      ${select('searchLocation', 'Lieu', [['all', 'Tous les lieux'], ...Object.entries(LOCATIONS)], state.location)}
       <div class="row">${select('searchState', 'État', [['visible', 'Non masquées'], ['new', 'Nouvelles'], ['saved', 'Enregistrées'], ['hidden', 'Masquées'], ['all', 'Toutes les offres']], state.filter)}${button('reload', 'Actualiser')}</div>
       ${select('searchSort', 'Trier par', [['relevance', 'Pertinence'], ['published-desc', 'Publication : plus récentes'], ['published-asc', 'Publication : plus anciennes']], state.sort)}
       <div class="small muted">${label('Les offres sans date de publication restent en bas du tri par date.')}</div>
@@ -198,7 +199,7 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
     if (el.dataset.searchSetting) { state.settings[el.dataset.searchSetting] = el.dataset.searchSetting === 'maxPages' ? Number(el.value) : el.value; state.dirty = true; renderPlan(); }
     if (el.dataset.searchCategory) { state.settings.categories = [...element.querySelectorAll('[data-search-category]:checked')].map(e => e.dataset.searchCategory); state.dirty = true; renderPlan(); }
     if (el.dataset.searchDraft) state.draft[el.dataset.searchDraft] = el.value;
-    const field = { searchState: 'filter', searchKind: 'kind', searchPlatform: 'platform', searchSource: 'source', searchText: 'text', searchSort: 'sort' }[el.id];
+    const field = { searchState: 'filter', searchKind: 'kind', searchPlatform: 'platform', searchSource: 'source', searchLocation: 'location', searchText: 'text', searchSort: 'sort' }[el.id];
     if (field) { state[field] = el.value; state.limit = 30; renderCatalog(); }
   }
   element.addEventListener('input', input); element.addEventListener('change', input);
