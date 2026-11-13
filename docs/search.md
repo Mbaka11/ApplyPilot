@@ -24,7 +24,7 @@ verification boundaries](prototype.md).
    create an application; resuming an existing application is also explicit.
 
 Search never navigates, reloads or closes a pre-existing application tab. It does
-not invoke pi, generate application documents, fill forms or submit anything.
+not invoke the AI provider, generate application documents, fill forms or submit anything.
 
 ## Link quality, platform and provenance
 
@@ -130,7 +130,7 @@ catalog mutation changes or deletes one.
 ## Local API
 
 All routes retain localhost Host/Origin protection. **Only `/search/linkedin` below
-performs a remote request**, and only to its fixed public endpoint. None invokes pi,
+performs a remote request**, and only to its fixed public endpoint. None invokes the AI provider,
 creates an application or submits a form.
 
 | Method | Route | Behavior |

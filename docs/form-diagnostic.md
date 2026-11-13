@@ -1,6 +1,6 @@
 # Local form diagnostic (unreleased 0.7.0)
 
-The **Application → Page → Local form diagnostic → Export local diagnostic** action downloads `applypilot-form-diagnostic.json` through Chrome. The local server and pi are not involved. It works without an active application or selected CV.
+The **Application → ⋯ Advanced tools → Export local diagnostic** action downloads `applypilot-form-diagnostic.json` through Chrome. The local server and the AI provider are not involved. It works without an active application or selected CV.
 
 Save any panel drafts before reloading **only ApplyPilot** in `chrome://extensions`, then close/reopen the panel. Keep the employer form open: do not refresh it, remove/reimport the extension or restart Chrome. This diagnostic uses a standalone isolated-world function and does not require reinjecting the autofill scripts or restarting the server.
 
