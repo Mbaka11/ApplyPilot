@@ -1,11 +1,13 @@
 // Called from real-extension E2E; the test server simulates all native launches.
 import fs from 'node:fs';
 import path from 'node:path';
+import { openStep } from './panel-steps.mjs';
 export async function testSelectedCv({ panel, site, sw, apiBase, out, check }) {
   const request = route => fetch(apiBase + route).then(response => response.json());
   const set = (selector, value) => panel.$eval(selector, (element, value) => { element.value = value; element.dispatchEvent(new Event('input', { bubbles: true })); }, value);
   await panel.setViewport({ width: 420, height: 1000 });
   await panel.click('[data-tab="app"]');
+  await openStep(panel, 'docs');
   await panel.waitForFunction(() => !!document.querySelector('#cvInspector .cv-file-path') && !document.querySelector('[data-cv-action="preview"]').disabled);
   const initialId = await panel.$eval('#cvSelect', element => element.value);
   const { applications } = await request('/applications');
@@ -14,7 +16,7 @@ export async function testSelectedCv({ panel, site, sw, apiBase, out, check }) {
   const initialPath = await panel.$eval('.cv-file-path', element => element.textContent);
   const initialSubject = await panel.$eval('#letterSubject', element => element.value);
   await set('#letterSubject', initialSubject + ' — unsaved CV preview draft');
-  await panel.$eval('#letterCard details', element => { element.open = true; });
+  await panel.$eval('#letterCard details.instructions', element => { element.open = true; });
   await set('#letterInstructions', 'Unsaved CV inspection instructions');
   await site.evaluate(() => { globalThis.cvPreviewSentinel = 'preserve form'; });
   const fieldsBefore = await site.$$eval('input, textarea, select', elements => elements.map(element => [element.id, element.value]));
@@ -81,13 +83,34 @@ export async function testSelectedCv({ panel, site, sw, apiBase, out, check }) {
   await panel.waitForFunction(id => document.querySelector('.cv-file-path')?.textContent.endsWith(id + '.pdf') && !document.querySelector('[data-cv-action="preview"]').disabled, {}, initialId);
   await panel.$eval('#cvInspector details', element => { element.open = true; });
   await panel.setViewport({ width: 320, height: 1000 });
-  check('long CV filenames and full paths fit the 320px side panel', await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  check('long CV filenames and full paths fit the 320px side panel', await panel.evaluate(() => [document.documentElement, document.querySelector('main')].every(element => element.scrollWidth <= element.clientWidth)));
   await panel.setViewport({ width: 420, height: 1000 });
   await panel.evaluate(() => { window.scrollTo(0, 0); document.querySelector('#toast').className = 'toast'; });
-  const height = await panel.$eval('#appCard', element => Math.ceil(element.getBoundingClientRect().bottom + scrollY + 15));
+  const height = await panel.$eval('#stepper', element => Math.ceil(element.getBoundingClientRect().bottom + scrollY + 15));
   await panel.screenshot({ path: path.join(out, 'cv-preview-en.png'), clip: { x: 0, y: 0, width: 420, height }, captureBeyondViewport: true });
   const after = (await request(`/applications/${appId}`)).application;
   check('CV inspection preserves unsaved letter subject and instructions', (await panel.$eval('#letterSubject', element => element.value)) === initialSubject + ' — unsaved CV preview draft' && (await panel.$eval('#letterInstructions', element => element.value)) === 'Unsaved CV inspection instructions');
   check('CV actions preserve stored letter, status and the existing employer form', JSON.stringify(after.letter) === JSON.stringify(before.letter) && after.status === before.status && await site.evaluate(() => globalThis.cvPreviewSentinel === 'preserve form') && JSON.stringify(await site.$$eval('input, textarea, select', elements => elements.map(element => [element.id, element.value]))) === JSON.stringify(fieldsBefore));
+  await panel.click('[data-tab="profile"]');
+  await panel.waitForSelector('[data-profile-cv]');
+  const profileButtons = await panel.$$eval('[data-profile-cv]', elements => elements.map(element => ({ id: element.dataset.profileCv, url: element.dataset.openUrl, label: element.textContent })));
+  const { cvs } = await request('/cvs');
+  check('Profile offers a correctly bound PDF preview for every configured CV', profileButtons.length === cvs.length && profileButtons.every(button => cvs.some(cv => cv.id === button.id) && button.url.startsWith(`${apiBase}/cvs/${encodeURIComponent(button.id)}/pdf?`) && button.label === 'Preview CV'));
+  const profileTabIds = await sw.evaluate(() => chrome.tabs.query({}).then(tabs => tabs.map(tab => tab.id)));
+  // Profile may rerender after its asynchronous health refresh; click the current DOM node atomically.
+  const profilePreviewUrl = await panel.$eval('[data-profile-cv]', element => { const url = element.dataset.openUrl; element.click(); return url; });
+  let profilePreview;
+  for (let i = 0; i < 100 && !profilePreview; i++) {
+    profilePreview = await sw.evaluate(async ({ ids, url }) => (await chrome.tabs.query({})).find(tab => !ids.includes(tab.id) && tab.url === url), { ids: profileTabIds, url: profilePreviewUrl });
+    if (!profilePreview) await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  check('Profile preview opens the original PDF in a new tab', !!profilePreview);
+  if (profilePreview) await sw.evaluate(id => chrome.tabs.remove(id), profilePreview.id);
+  await panel.bringToFront();
+  await panel.select('#uiLanguage', 'fr');
+  check('Profile preview is translated into French', (await panel.$eval('[data-profile-cv]', element => element.textContent)) === 'Aperçu du CV');
+  await panel.select('#uiLanguage', 'en');
+  await panel.click('[data-tab="app"]');
+  check('Profile preview preserves unsaved application drafts and the employer form', (await panel.$eval('#letterSubject', element => element.value)) === initialSubject + ' — unsaved CV preview draft' && await site.evaluate(() => globalThis.cvPreviewSentinel === 'preserve form'));
   await panel.evaluate(() => { globalThis.fetch = globalThis.__cvOriginalFetch; navigator.clipboard.writeText = globalThis.__cvOriginalClipboard; });
 }

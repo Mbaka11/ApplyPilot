@@ -14,13 +14,13 @@ export async function testFormDiagnostic({ browser, panel, site, apiBase, out, c
   await site.goto(new URL('/successfactors-diagnostic.html?token=PRIVATE_PAGE_TOKEN', site.url()).href);
   await panel.waitForFunction(() => document.querySelector('#pageCard')?.textContent.includes('Form:') && document.querySelector('#pageCard')?.textContent.includes('Careers website'));
   await panel.select('#uiLanguage', 'fr');
-  await panel.$eval('#pageCard details', element => { element.open = true; });
+  await panel.$eval('#advancedTools', element => { element.open = true; });
   check('local diagnostic is explicit and translated', (await panel.$eval('[data-action="diagnostic"]', element => element.textContent)) === 'Exporter le diagnostic local');
   await panel.select('#uiLanguage', 'en');
-  await panel.$eval('#pageCard details', element => { element.open = true; });
-  check('English diagnostic describes local-only export and redacted labels', (await panel.$eval('#pageCard details', element => element.textContent)).includes('No answers') && (await panel.$eval('[data-action="diagnostic"]', element => element.textContent)) === 'Export local diagnostic');
+  await panel.$eval('#advancedTools', element => { element.open = true; });
+  check('English diagnostic describes local-only export and redacted labels', (await panel.$eval('#advancedTools', element => element.textContent)).includes('No answers') && (await panel.$eval('[data-action="diagnostic"]', element => element.textContent)) === 'Export local diagnostic');
   await panel.setViewport({ width: 320, height: 1000 });
-  check('diagnostic controls fit a 320px panel', await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  check('diagnostic controls fit a 320px panel', await panel.evaluate(() => [document.documentElement, document.querySelector('main')].every(element => element.scrollWidth <= element.clientWidth)));
   await panel.setViewport({ width: 420, height: 1000 });
   const beforeForm = await site.evaluate(() => ({ sentinel: unsavedSentinel, fields: [...document.querySelectorAll('input, textarea, select')].map(element => [element.id, element.value, element.checked]), events: formEvents }));
   const beforeTabs = browser.targets().length;

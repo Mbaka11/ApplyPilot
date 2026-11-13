@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { openStep } from './panel-steps.mjs';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function testDocumentPreparation({ panel, site, sw, apiBase, out, restoreId, check }) {
   const originalUrl = site.url(), markersDir = path.join(out,'fake-pi'), delayFile=markersDir+'-letter-delay.json';
@@ -33,8 +34,8 @@ export async function testDocumentPreparation({ panel, site, sw, apiBase, out, r
     await panel.waitForFunction(()=>document.querySelector('#fillCard')?.textContent.includes('Generating cover letter'));
     let pid;
     for(let i=0;i<100&&!pid;i++){const name=[...markers()].find(name=>!beforeStop.has(name));if(name)pid=JSON.parse(fs.readFileSync(path.join(markersDir,name),'utf8')).pid;else await sleep(40);}
-    check('automatic generation shows requested model and keeps Stop available',!!pid && (await panel.$eval('#letterCard',e=>e.textContent)).includes('fixture/requested') && await panel.$eval('#headerStop',e=>!e.classList.contains('hidden')));
-    await panel.click('#headerStop');
+    check('automatic generation shows requested model and keeps Stop available',!!pid && (await panel.$eval('#letterCard',e=>e.textContent)).includes('fixture/requested') && !!(await panel.$('#actionBar [data-action="stopFill"]')));
+    await panel.click('#actionBar [data-action="stopFill"]');
     const alive=()=>{try{process.kill(pid,0);return true;}catch{return false;}};
     for(let i=0;i<100&&alive();i++)await sleep(40);
     check('Stop kills letter generation, preserves input and never starts an upload',!!pid && !alive() && !(await api('GET',`/applications/${app.id}`)).application.letter?.body && await site.evaluate(()=>sfUploads.uploads.length===0&&document.getElementById('first').value==='Preserved document-demo input'));
@@ -52,8 +53,8 @@ export async function testDocumentPreparation({ panel, site, sw, apiBase, out, r
     await panel.$eval('#letterSubject',element=>{element.value+=' Unsaved';element.dispatchEvent(new Event('input',{bubbles:true}));});
     await panel.click('[data-action="prepareDocuments"]'); await sleep(100);
     check('unsaved letter drafts block automatic regeneration or attachment',markers().size===beforeRepeat && (await panel.$eval('#toast',e=>e.textContent)).includes('Save your cover letter draft') && await panel.$eval('#letterSubject',e=>e.value.endsWith('Unsaved')));
-    await panel.click('[data-action="saveLetter"]'); await panel.waitForFunction(()=>document.querySelector('#toast')?.textContent.includes('PDF updated'));
-    await panel.select('#uiLanguage','fr');
+    await openStep(panel,'docs'); await panel.click('[data-action="saveLetter"]'); await panel.waitForFunction(()=>document.querySelector('#toast')?.textContent.includes('PDF updated'));
+    await openStep(panel,'fill'); await panel.select('#uiLanguage','fr');
     check('automatic document action is localized and fits the narrow panel',await panel.$eval('[data-action="prepareDocuments"]',e=>e.textContent==='Préparer et joindre CV + lettre'&&e.getBoundingClientRect().right<=innerWidth));
     await panel.select('#uiLanguage','en');
     await panel.evaluate(()=>{globalThis.__documentFetch=globalThis.fetch;globalThis.fetch=async(...args)=>{const response=await __documentFetch(...args);if(String(args[0]).endsWith('/health')){const health=await response.json();delete health.features;return new Response(JSON.stringify(health),{headers:{'content-type':'application/json'}});}return response;};});
@@ -63,7 +64,7 @@ export async function testDocumentPreparation({ panel, site, sw, apiBase, out, r
   } finally {
     fs.rmSync(delayFile,{force:true});
     await panel.evaluate(()=>{if(globalThis.__documentFetch){globalThis.fetch=globalThis.__documentFetch;delete globalThis.__documentFetch;}});
-    if(await panel.$('#headerStop:not(.hidden)'))await panel.click('#headerStop');
+    if(await panel.$('#actionBar [data-action="stopFill"]'))await panel.click('#actionBar [data-action="stopFill"]');
     await panel.click('#serverStatus'); await panel.click('[data-tab="home"]');
     await panel.waitForSelector(`[data-activate="${restoreId}"]`);
     const discardFixtureDraft=dialog=>dialog.accept(); panel.on('dialog',discardFixtureDraft);

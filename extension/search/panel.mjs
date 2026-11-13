@@ -2,14 +2,14 @@ import { CATEGORIES, SCOPES, searchDefaults, validateSettings, buildSearchPlan, 
 import { PLATFORMS, catalogMeta, filterCatalog, sortCatalog } from './catalog.mjs';
 import { runGoogleSearch, searchDelay } from './runner.mjs';
 
-export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, toast, canStart, activateApplication }) {
+export function createSearchPanel({ element, onRunChange = () => {}, api, tr, esc, fmtDate, toast, infoButton, infoBody, canStart, activateApplication }) {
   const state = { settings: null, jobs: [], loaded: false, dirty: false, loading: false, mutating: false, revision: 0, run: null, progress: null, message: '', messageValues: {}, tone: '', lastTabId: null,
-    filter: 'visible', kind: 'job', platform: 'all', source: 'all', text: '', sort: 'relevance', limit: 30,
+    filter: 'visible', kind: 'job', platform: 'all', source: 'all', text: '', sort: 'published-desc', limit: 30,
     draft: { links: '', title: '', company: '', location: '', employerUrl: '', description: '' }, detailsOpen: false, planOpen: false, settingsOpen: false, manualOpen: false };
   const busy = () => !!state.run || state.mutating || state.loading;
   const $ = selector => element.querySelector(selector);
   const label = source => esc(tr(source));
-  const button = (action, title, id = '', extra = '') => `<button type="button" class="btn ${extra}" data-search-action="${action}" ${id ? `data-search-id="${esc(id)}"` : ''} ${busy() && !['stop', 'viewTab'].includes(action) ? 'disabled' : ''}>${label(title)}</button>`;
+  const button = (action, title, id = '', extra = '') => `<button type="button" class="btn ${extra}" data-search-action="${action}" ${id ? `data-search-id="${esc(id)}"` : ''} ${busy() && !['stop', 'viewTab'].includes(action) || action === 'clear' && !state.jobs.length ? 'disabled' : ''}>${label(title)}</button>`;
   function feedback(message, tone = '', values = {}) { state.message = message; state.messageValues = values; state.tone = tone; renderProgress(); }
   function adopt(data, { settings = false } = {}) {
     state.jobs = data.jobs || [];
@@ -17,12 +17,12 @@ export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, 
     state.loaded = true;
   }
   function renderProgress() {
-    stopButton.classList.toggle('hidden', !state.run); stopButton.textContent = tr('Arrêter la recherche');
+    onRunChange();
     if (!$('#searchProgress')) return;
     const p = state.progress;
     $('#searchProgress').innerHTML = `${state.run && p ? `<div class="small"><b>${esc(tr('Recherche {page}/{total} · {found} lien(s) lu(s)', p))}</b><progress max="${p.total}" value="${p.status === 'saved' ? p.page : p.page - 1}"></progress></div>` : ''}
       ${state.message ? `<div class="small ${state.tone === 'error' ? 'search-error' : 'muted'}">${esc(tr(state.message, state.messageValues))}</div>` : ''}
-      <div class="row">${state.run ? button('stop', 'Arrêter la recherche', '', 'danger') : ''}${state.lastTabId ? button('viewTab', 'Voir l’onglet de recherche') : ''}</div>`;
+      ${state.lastTabId ? `<div class="row">${button('viewTab', 'Voir l’onglet de recherche', '', 'ghost')}</div>` : ''}`;
   }
   function renderPlan() {
     if (!$('#searchPlan')) return;
@@ -57,17 +57,17 @@ export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, 
   }
   function render() {
     for (const [id, key] of [['searchImportDetails', 'detailsOpen'], ['searchPlanDetails', 'planOpen'], ['searchSettingsDetails', 'settingsOpen'], ['searchManualDetails', 'manualOpen']]) state[key] = $('#' + id)?.open ?? state[key];
-    stopButton.classList.toggle('hidden', !state.run); stopButton.textContent = tr('Arrêter la recherche');
+    onRunChange();
     if (!state.settings) {
       element.innerHTML = `<div class="card"><h2>${label('Recherche de stages')}</h2><p class="small">${label(state.loading ? 'Chargement…' : state.message || 'Charge le catalogue pour commencer.')}</p>${button('reload', 'Recharger')}</div>`;
       return;
     }
     const s = state.settings;
     const select = (id, title, options, value) => `<label for="${id}">${label(title)}</label><select id="${id}">${options.map(([key, name]) => `<option value="${key}" ${key === value ? 'selected' : ''}>${label(name)}</option>`).join('')}</select>`;
-    element.innerHTML = `<div class="card"><h2>${label('Recherche de stages')} <span class="badge warn">${label('LinkedIn expérimental')}</span></h2>
-      <p class="small muted">${label('Des liens d’offres individuelles, avec leur plateforme et leur provenance. Aucune candidature créée automatiquement.')}</p>
-      <div class="row search-actions">${button('startLinkedIn', 'LinkedIn · prototype', '', 'primary')}${button('start', 'Chercher sur Google')}</div>
-      <p class="small muted">${label('LinkedIn public : accès non officiel sans compte ni cookies. Requêtes limitées, arrêt au premier blocage. Les conditions LinkedIn restreignent l’automatisation.')}</p>
+    element.innerHTML = `<div class="card"><div class="card-head"><h2>${label('Recherche de stages')}</h2><span class="badge warn">${label('LinkedIn expérimental')}</span></div>
+      <div class="row search-actions">${button('start', 'Chercher sur Google', '', 'primary')}${button('startLinkedIn', 'LinkedIn · prototype')}</div>
+      <div class="row small muted search-hint"><span class="grow">${label('Des liens d’offres individuelles, avec leur plateforme et leur provenance. Aucune candidature créée automatiquement.')}</span>${infoButton('info-search')}</div>
+      ${infoBody('info-search', `<p>${label('LinkedIn public : accès non officiel sans compte ni cookies. Requêtes limitées, arrêt au premier blocage. Les conditions LinkedIn restreignent l’automatisation.')}</p><p>${label('Pas de navigation dans tes formulaires. Garde le panneau ouvert ; Arrêter interrompt les requêtes suivantes et conserve les résultats déjà reçus.')}</p>`)}
       <details id="searchSettingsDetails" ${state.settingsOpen ? 'open' : ''}><summary>${label('Filtres de recherche')}</summary>
         <form id="searchForm" class="stack"><fieldset ${busy() ? 'disabled' : ''}>
           <label for="searchKeywords">${label('Mots-clés de stage')}</label><input type="text" id="searchKeywords" data-search-setting="keywords" value="${esc(s.keywords)}" maxlength="200">
@@ -80,10 +80,10 @@ export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, 
         </fieldset></form>
       </details>
       <details id="searchPlanDetails" ${state.planOpen ? 'open' : ''}><summary>${label('Voir les requêtes exactes')}</summary><ul id="searchPlan" class="small search-plan"></ul></details>
-      <p class="small muted">${label('Pas de navigation dans tes formulaires. Garde le panneau ouvert ; Arrêter interrompt les requêtes suivantes et conserve les résultats déjà reçus.')}</p>
       <div id="searchProgress" role="status" aria-live="polite"></div>
     </div>
     <div class="card"><h2>${label('Catalogue local')} <span id="searchCount"></span></h2>
+      <div class="row search-actions">${button('clear', 'Vider le catalogue', '', 'ghost danger')}</div>
       <div id="searchQuality" class="small muted"></div>
       ${select('searchKind', 'Type de lien', [['job', 'Offres identifiées'], ['unknown', 'Liens à vérifier'], ['listing', 'Pages de résultats'], ['all', 'Tous les liens']], state.kind)}
       <div class="search-filter-grid"><div>${select('searchPlatform', 'Plateforme', [['all', 'Toutes les plateformes'], ...Object.entries(PLATFORMS)], state.platform)}</div><div>${select('searchSource', 'Découverte', [['all', 'Toutes les provenances'], ['linkedin-public', 'LinkedIn public'], ['google', 'Google'], ['manual', 'Ajout manuel']], state.source)}</div></div>
@@ -165,6 +165,13 @@ export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, 
   function reset() { stop({ quiet: true }); ++state.revision; state.jobs = []; state.loaded = false; state.loading = false; state.mutating = false; render(); }
   const actions = {
     start: () => start('google'), startLinkedIn: () => start('linkedin-public'), stop, reload: load,
+    clear: async () => {
+      if (busy() || !state.jobs.length) return;
+      const ids = state.jobs.map(job => job.id);
+      if (!confirm(tr('Supprimer les {count} liens du catalogue, y compris les favoris et les liens masqués ? Une sauvegarde locale sera conservée. Les candidatures, CV, lettres et filtres de recherche ne seront pas supprimés.', { count: ids.length }))) return;
+      if (busy()) return;
+      if (await mutate('/search/clear', { method: 'POST', body: { confirm: true, ids } }, { message: 'Catalogue vidé. Les candidatures et les filtres de recherche sont conservés.' })) { state.limit = 30; render(); }
+    },
     saveSettings: () => mutate('/search/settings', { method: 'PUT', body: validateSettings(state.settings) }, { settings: true, message: 'Filtres enregistrés.' }),
     import: async () => {
       const { links, ...details } = state.draft;
@@ -195,6 +202,6 @@ export function createSearchPanel({ element, stopButton, api, tr, esc, fmtDate, 
     if (field) { state[field] = el.value; state.limit = 30; renderCatalog(); }
   }
   element.addEventListener('input', input); element.addEventListener('change', input);
-  element.addEventListener('submit', event => event.preventDefault()); stopButton.addEventListener('click', () => stop());
-  return { show: load, render, stop, reset, get running() { return !!state.run; } };
+  element.addEventListener('submit', event => event.preventDefault());
+  return { show: load, render, stop, reset, get running() { return !!state.run; }, get progress() { return state.progress; } };
 }

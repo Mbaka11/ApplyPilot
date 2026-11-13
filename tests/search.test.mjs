@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { searchDefaults, validateSettings, buildSearchPlan, linkedinSearchUrl, externalJobUrl, offerKey, applicationJobKey, manualLinks, rankOffer, isGoogleSearch, isExpectedSearch } from '../extension/search/core.mjs';
+import { searchDefaults, validateSettings, buildSearchPlan, buildLinkedInPlan, linkedinSearchUrl, externalJobUrl, offerKey, applicationJobKey, manualLinks, rankOffer, isGoogleSearch, isExpectedSearch } from '../extension/search/core.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'tests/output/search-unit');
 fs.mkdirSync(OUT, { recursive: true });
 const DATA = fs.mkdtempSync(path.join(OUT, 'catalog-'));
 process.env.APPLYPILOT_DATA_DIR = DATA;
-const { getSearch, addDiscoveries, importDiscoveries, saveSearchSettings, updateDiscovery, deleteDiscovery } = await import('../server/src/search.js');
+const { getSearch, addDiscoveries, importDiscoveries, saveSearchSettings, updateDiscovery, deleteDiscovery, clearDiscoveries } = await import('../server/src/search.js');
 const file = path.join(DATA, 'search/discovery.json');
 const defaults = searchDefaults({ availability: { termEn: 'Winter 2027' } });
 const employer = 'https://careers.example.org/jobs/software-intern';
@@ -18,6 +18,38 @@ const linked = 'https://www.linkedin.com/jobs/view/1234567890';
 const sample = { url: employer, title: 'Software intern — Winter 2027', location: 'Montréal', snippet: 'Hybrid software development internship.', source: 'google', query: 'software intern' };
 const reset = () => fs.rmSync(path.join(DATA, 'search'), { recursive: true, force: true });
 test.after(() => fs.rmSync(DATA, { recursive: true, force: true }));
+
+test('clear requires exact confirmation and current IDs, backs up bytes and keeps settings/applications', () => {
+  reset();
+  saveSearchSettings(defaults);
+  addDiscoveries([sample, { ...sample, url: employer + '-2' }]);
+  const jobs = getSearch().jobs;
+  updateDiscovery(jobs[0].id, { status: 'saved' });
+  updateDiscovery(jobs[1].id, { status: 'hidden' });
+  const before = fs.readFileSync(file);
+  const ids = jobs.map(job => job.id);
+  const sentinel = path.join(DATA, 'applications', 'fictional', 'application.json');
+  fs.mkdirSync(path.dirname(sentinel), { recursive: true });
+  fs.writeFileSync(sentinel, 'application preserved');
+  for (const input of [null, {}, { confirm: false, ids }, { confirm: true, ids, extra: true }, { confirm: true, ids: [ids[0], ids[0]] }]) {
+    assert.throws(() => clearDiscoveries(input), { status: 400 });
+    assert.deepEqual(fs.readFileSync(file), before);
+  }
+  assert.throws(() => clearDiscoveries({ confirm: true, ids: [ids[0]] }), { status: 409 });
+  assert.deepEqual(clearDiscoveries({ confirm: true, ids: [...ids].reverse() }), { removed: 2 });
+  assert.deepEqual(getSearch().jobs, []);
+  assert.deepEqual(getSearch().settings, defaults);
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'application preserved');
+  const backups = fs.readdirSync(path.join(DATA, 'backups', 'search')).filter(name => name.startsWith('discovery-before-clear-'));
+  assert.equal(backups.length, 1);
+  assert.deepEqual(fs.readFileSync(path.join(DATA, 'backups', 'search', backups[0])), before);
+  assert.deepEqual(clearDiscoveries({ confirm: true, ids: [] }), { removed: 0 });
+  fs.writeFileSync(file, '{broken');
+  assert.throws(() => clearDiscoveries({ confirm: true, ids: [] }), { status: 409 });
+  assert.equal(fs.readFileSync(file, 'utf8'), '{broken');
+  fs.rmSync(path.join(DATA, 'applications'), { recursive: true, force: true });
+  reset();
+});
 
 test('defaults broaden domains but never leak profile contact/eligibility data into search', () => {
   const settings = searchDefaults({ identity: { email: 'PRIVATE_CANARY', address: { line1: 'PRIVATE_CANARY' } }, languages: [{ level: 'PRIVATE_CANARY' }], availability: { termEn: 'Winter 2027' } });
@@ -29,6 +61,25 @@ test('defaults broaden domains but never leak profile contact/eligibility data i
   assert.match(plan[0].query, /winter 2027.*hiver 2027/i);
   assert.match(plan[1].query, /Canada.*remote/);
   assert.equal(buildSearchPlan({ ...settings, maxPages: 2 }).length, 2);
+});
+test('Montréal/Canada queries come first; Toronto and US only use spare budget', () => {
+  const settings = { ...defaults, scope: 'montreal_plus' };
+  const plan = buildSearchPlan(settings);
+  assert.equal(plan.length, 8);
+  assert.ok(plan.slice(0, 6).every(p => /Montreal|Canada\) \(remote/.test(p.query)));
+  assert.match(plan[6].query, /Toronto/);
+  assert.match(plan[7].query, /United States/);
+  assert.match(plan[6].query, /machine learning.*software.*data science.*consulting/);
+  const small = buildSearchPlan({ ...settings, maxPages: 3 });
+  assert.ok(small.every(p => !/Toronto|United States/.test(p.query)));
+  assert.deepEqual(buildLinkedInPlan(settings).slice(-2).map(p => p.location), ['Toronto, Ontario, Canada', 'United States']);
+  assert.ok(buildSearchPlan({ ...defaults, scope: 'toronto' }).every(p => /Toronto/.test(p.query)));
+  assert.ok(buildSearchPlan({ ...defaults, scope: 'usa' }).every(p => /United States/.test(p.query)));
+});
+test('ranking prefers Montréal, then the rest of Canada, then the United States', () => {
+  const job = location => rankOffer({ title: 'Software intern', location }, defaults).score;
+  assert.ok(job('Montréal, QC') > job('Toronto, ON'));
+  assert.ok(job('Toronto, ON') > job('New York, NY'));
 });
 test('settings are bounded, reject invalid values, and do not mutate the caller', () => {
   const original = JSON.stringify(defaults);

@@ -3,43 +3,58 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>ApplyPilot</title>
     <link rel="stylesheet" href="sidepanel.css" />
   </head>
   <body>
     <header class="top">
       <div class="brand"><img src="../icons/icon32.png" alt="" /><span>ApplyPilot</span><span id="appVersion" class="version" title="Extension version">…</span></div>
-      <button id="serverStatus" class="status" data-action="recheck" title="Recheck the server connection">…</button>
+      <div class="top-actions">
+        <button id="serverStatus" class="status" data-action="recheck" title="Recheck the server connection"><span class="dot" aria-hidden="true"></span><span id="serverStatusText" class="status-text">…</span></button>
+        <button type="button" id="profileButton" class="icon-btn" data-tab="profile" aria-label="Profile" title="Profile"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
+        <button type="button" id="settingsButton" class="icon-btn" data-tab="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      </div>
     </header>
-    <div class="language-bar">
-      <button type="button" id="headerStop" class="btn danger hidden" data-action="stopFill">Stop</button>
-      <button type="button" id="headerSearchStop" class="btn danger hidden">Stop search</button>
-      <label id="uiLanguageLabel" for="uiLanguage">Interface language</label>
-      <select id="uiLanguage"><option value="en">English</option><option value="fr">Français</option></select>
-    </div>
 
-    <nav class="tabs">
+    <nav class="tabs" aria-label="Sections">
       <button data-tab="home" class="active">Home</button>
       <button data-tab="app">Application</button>
       <button data-tab="search">Search</button>
       <button data-tab="journal">Tracker</button>
-      <button data-tab="profile">Profile</button>
     </nav>
 
     <main>
       <div id="offline" class="card warn hidden"></div>
       <section id="tab-home" class="tab active"></section>
       <section id="tab-app" class="tab">
-        <div id="pageCard" class="card"></div>
-        <div id="appCard" class="card"></div>
-        <div id="letterCard" class="card"></div>
-        <div id="fillCard" class="card"></div>
+        <ol class="stepper" id="stepper">
+          <li class="step" data-step="offer">
+            <h2 class="step-title"><button type="button" class="step-head" data-step-toggle="offer" aria-controls="stepBody-offer"><span class="step-num" aria-hidden="true">1</span><span class="step-name"></span><span class="step-sum"></span></button></h2>
+            <div class="step-body" id="stepBody-offer"><div id="pageCard"></div><div id="appCard"></div></div>
+          </li>
+          <li class="step" data-step="docs">
+            <h2 class="step-title"><button type="button" class="step-head" data-step-toggle="docs" aria-controls="stepBody-docs"><span class="step-num" aria-hidden="true">2</span><span class="step-name"></span><span class="step-sum"></span></button></h2>
+            <div class="step-body" id="stepBody-docs"><div id="cvCard"></div><div id="letterCard"></div></div>
+          </li>
+          <li class="step" data-step="fill">
+            <h2 class="step-title"><button type="button" class="step-head" data-step-toggle="fill" aria-controls="stepBody-fill"><span class="step-num" aria-hidden="true">3</span><span class="step-name"></span><span class="step-sum"></span></button></h2>
+            <div class="step-body" id="stepBody-fill"><div id="fillCard"></div></div>
+          </li>
+          <li class="step" data-step="submit">
+            <h2 class="step-title"><button type="button" class="step-head" data-step-toggle="submit" aria-controls="stepBody-submit"><span class="step-num" aria-hidden="true">4</span><span class="step-name"></span><span class="step-sum"></span></button></h2>
+            <div class="step-body" id="stepBody-submit"><div id="submitCard"></div></div>
+          </li>
+        </ol>
+        <details class="more" id="advancedTools"></details>
       </section>
       <section id="tab-search" class="tab"></section>
       <section id="tab-journal" class="tab"></section>
       <section id="tab-profile" class="tab"></section>
+      <section id="tab-settings" class="tab"></section>
     </main>
 
+    <div id="actionBar" class="action-bar hidden" role="region" aria-label="Main action"></div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="sidepanel.js"></script>
   </body>

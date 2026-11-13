@@ -42,7 +42,7 @@ const profile = path.join(OUT, 'profile.yaml');
 fs.writeFileSync(profile, 'identity:\n  firstName: Alex\n  lastName: Exemple\n');
 fs.writeFileSync(config, [
   `cvDir: ${JSON.stringify(CVS.replace(/\\/g, '/'))}`,
-  `llm:\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests/fixtures/fake-pi.mjs').replace(/\\/g, '/'))}`,
+  `llm:\n  provider: pi\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests/fixtures/fake-pi.mjs').replace(/\\/g, '/'))}`,
   `cvTailor:\n  pdflatex: ${JSON.stringify(path.join(ROOT, 'tests/fixtures/fake-pdflatex.mjs').replace(/\\/g, '/'))}`,
 ].join('\n'));
 

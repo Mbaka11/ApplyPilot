@@ -20,7 +20,7 @@ or production-validated integration. Release 0.5.0 and its immutable tag are unc
   forces resumption. Leaving an application does not change its status.
 - Cover-letter settings are visible before/during generation. Reported provider/model,
   requested effort and attempt count are retained afterward. Effective effort is
-  unknown because the pi JSON stream does not report it. Legacy letters stay unknown.
+  unknown because the provider does not report it (pi in 0.6–0.7; Claude Code CLI since 0.8.0). Legacy letters stay unknown.
 - Draft switching/regeneration requires confirmation. User instructions are captured
   before the busy view replaces their input. Manual PDF edits retain attribution;
   concurrent tracker status/notes are not overwritten by delayed generation.

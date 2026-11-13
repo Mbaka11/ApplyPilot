@@ -15,17 +15,42 @@ check('saved interface choice overrides the browser, without changing document l
   assert.equal(chooseLanguage(null, 'es-ES'), 'en');
   assert.equal(chooseLanguage('auto', 'en-CA'), 'en');
 });
-check('the CV-tailoring panel and its server messages have English coverage', () => {
-  const source = fs.readFileSync(new URL('../extension/sidepanel/cv-tailor.mjs', import.meta.url), 'utf8');
-  const strings = [...source.matchAll(/tr\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'").replace(/\\n/g, '\n'));
-  assert.ok(strings.length > 12);
-  for (const text of strings) assert.ok(Object.hasOwn(EN, text), `Untranslated CV-tailoring text: ${text}`);
+check('every panel module (views, stepper, action bar, settings, search) has English coverage', () => {
+  const dir = new URL('../extension/sidepanel/', import.meta.url);
+  const files = [...fs.readdirSync(dir).filter((f) => /\.(mjs|js)$/.test(f)).map((f) => new URL(f, dir)),
+    ...fs.readdirSync(new URL('views/', dir)).filter((f) => f.endsWith('.mjs')).map((f) => new URL(`views/${f}`, dir)),
+    new URL('../search/panel.mjs', dir)];
+  const strings = new Set();
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8');
+    // Every quoted literal inside a tr(...) call, including ternaries such as tr(L ? 'A' : 'B').
+    for (const m of source.matchAll(/\btr\(/g)) {
+      let depth = 0, i = m.index + 3, end = source.length;
+      for (; i < source.length; i++) {
+        const c = source[i];
+        if (c === '(') depth++;
+        else if (c === ')' && --depth < 0) { end = i; break; }
+        else if (c === "'" || c === '`') { const q = c; for (i++; i < source.length && source[i] !== q; i++) if (source[i] === '\\') i++; }
+      }
+      const call = source.slice(m.index + 3, end);
+      for (const s of call.matchAll(/(?<!===\s)'((?:[^'\\]|\\.)*)'/g)) strings.add(s[1].replace(/\\'/g, "'").replace(/\\n/g, '\n'));
+    }
+    if (file.pathname.endsWith('panel.mjs')) for (const m of source.matchAll(/\blabel\('((?:[^'\\]|\\.)*)'/g)) strings.add(m[1].replace(/\\'/g, "'"));
+  }
+  assert.ok(strings.size > 150);
+  const missing = [...strings].filter((text) => /\p{L}/u.test(text) && !Object.hasOwn(EN, text) && !/^[A-Za-z0-9_.-]+$/.test(text) && !/^[\dTZ:.-]+$/.test(text) && !/^\{\w+\}$/.test(text));
+  assert.deepEqual(missing, [], `Untranslated panel strings:\n${missing.join('\n')}`);
+});
+check('stepper, tab and AI-settings labels built from lookup tables are translated', () => {
+  for (const label of ['Offre', 'Remplissage', 'Soumission', 'Suivi', 'Lettre', 'Réponses', 'CV sur mesure', 'Soumise', 'En cours']) assert.notEqual(translate(label, 'en'), label, label);
+  assert.equal(translate('Documents', 'en'), 'Documents');
+  assert.ok(!/\bpi\b/i.test(translate('L’IA met trop de temps : remplissage arrêté. Réessaie ou désactive l’IA.', 'en')), 'user-facing AI wording must stay provider-neutral');
 });
 check('French remains the original display language', () => assert.equal(translate('Candidature', 'fr'), 'Candidature'));
 check('English labels and parameterized messages are localized', () => {
   assert.equal(translate('Candidature', 'en'), 'Application');
-  assert.equal(translate('pi répond à 1 question…', 'en'), 'pi is answering 1 question…');
-  assert.equal(translate('pi répond à 4 questions…', 'en'), 'pi is answering 4 questions…');
+  assert.equal(translate('L’IA répond à 1 question…', 'en'), 'The AI is answering 1 question…');
+  assert.equal(translate('L’IA répond à 4 questions…', 'en'), 'The AI is answering 4 questions…');
   assert.equal(translate('Serveur connecté · {count} CV', 'en', { count: 3 }), 'Server connected · 3 CVs');
   assert.equal(translate('Supprimer la candidature « {name} » et sa lettre ?', 'en', { name: 'Société {count}' }), 'Delete the application “Société {count}” and its cover letter?');
 });
@@ -75,4 +100,14 @@ check('shared translation script is safe to reinject (no top-level lexical colli
   const keys = [...source.matchAll(/^  '(.*?)':/gm)].map((m) => m[1]);
   assert.equal(new Set(keys).size, keys.length, 'Duplicate dictionary keys');
 });
+{
+  const { modelLabel } = await import('../extension/sidepanel/model-label.mjs');
+  check('modelLabel: Sonnet 5.5, Opus 4 (date suffix ignored), Opus 4.1, unknown ids unchanged', () => {
+    assert.equal(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
+    assert.equal(modelLabel('claude-opus-4-20250514'), 'Opus 4');
+    assert.equal(modelLabel('claude-opus-4-1-20250805'), 'Opus 4.1');
+    assert.equal(modelLabel('claude-haiku-4-5'), 'Haiku 4.5');
+    assert.equal(modelLabel('fixture/x'), 'fixture/x');
+  });
+}
 console.log(`\n${checks} localization checks passed.`);

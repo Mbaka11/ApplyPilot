@@ -16,10 +16,10 @@ import {
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
 import { cvFileActions } from './cv-files.js';
 import { TailorError, findLatex, sha256, tailorCv } from './cv-tailor.js';
-import { askJson, cancelAllPi, resolvePi, generationSettings } from './llm.js';
+import { askJson, cancelAll, resolvePi, generationSettings, llmHealth, providerSummary } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
-import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery } from './search.js';
+import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery, clearDiscoveries } from './search.js';
 import { searchLinkedInPage } from './linkedin.js';
 import { detectRequirements, transcriptPath } from './requirements.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
@@ -243,7 +243,7 @@ function sanitizeFields(fields) {
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
-route('GET', '/health', () => {
+route('GET', '/health', async () => {
   const cfg = getConfig();
   let profile = null;
   let profileError = null;
@@ -253,6 +253,7 @@ route('GET', '/health', () => {
     profileError = e.message;
   }
   const { cvs, error: cvError } = listCvs(cfg);
+  const llm = await llmHealth(cfg); // fournisseur et binaire résolus une seule fois par requête
   return {
     ok: true,
     version: VERSION,
@@ -266,8 +267,9 @@ route('GET', '/health', () => {
     cvDir: cfg.cvDir,
     cvCount: cvs.length,
     cvError: cvError || null,
-    pi: resolvePi(cfg).desc,
-    generation: generationSettings(cfg),
+    pi: llm.provider === 'pi' ? llm.runner : resolvePi(cfg).desc,
+    generation: generationSettings(cfg, llm.provider),
+    llm,
     chrome: findChrome(cfg),
     fill: cfg.fill,
     documents: { transcript: !!(profile && transcriptPath(profile)) },
@@ -343,6 +345,7 @@ route('POST', '/search/linkedin', async ({ body, res }) => {
   } finally { res.removeListener('close', disconnect); }
 });
 route('PATCH', '/search/jobs/:id', ({ params, body }) => { updateDiscovery(params.id, body); return discoveryView(); });
+route('POST', '/search/clear', ({ body }) => ({ ...clearDiscoveries(body), ...discoveryView() }));
 route('DELETE', '/search/jobs/:id', ({ params }) => { deleteDiscovery(params.id); return discoveryView(); });
 
 route('GET', '/applications', () => ({ applications: listApplications().map(summary), statuses: STATUSES }));
@@ -422,10 +425,10 @@ route('POST', '/applications/:id/letter', async ({ params, body, res }) => {
     instructions: String(body.instructions || '').slice(0, 2000),
     cfg,
   });
-  const { data, ms, runner, generation } = await askJson(prompt, { cfg, thinking: cfg.llm.letterThinking, signal: controller.signal });
+  const { data, ms, runner, generation } = await askJson(prompt, { cfg, task: 'letter', signal: controller.signal });
   checkpoint();
   if (!data || typeof data.body !== 'string' || data.body.trim().length < 200) {
-    throw new HttpError(502, 'pi a renvoyé une lettre vide ou incomplète, réessaie');
+    throw new HttpError(502, 'L’IA a renvoyé une lettre vide ou incomplète, réessaie');
   }
   const language = ['fr', 'en'].includes(body.language) ? body.language : data.language === 'en' ? 'en' : 'fr';
   const letter = {
@@ -637,7 +640,7 @@ route('POST', '/answers', async ({ body, res }) => {
   if (res.destroyed) controller.abort();
   let reply;
   try {
-    reply = await askJson(prompt, { cfg, thinking: cfg.llm.answersThinking, signal: controller.signal });
+    reply = await askJson(prompt, { cfg, task: 'answers', signal: controller.signal });
   } finally {
     res.off('close', disconnect);
   }
@@ -681,7 +684,7 @@ route('GET', '/', ({ res }) => {
 <ul><li>Profile: <code>${escapeHtml(PROFILE_FILE)}</code></li>
 <li>CVs (${cvs.length}): <code>${escapeHtml(cfg.cvDir || 'not configured')}</code>${error ? ` — ⚠️ ${escapeHtml(en(error))}` : ''}</li>
 <li>Applications: ${apps.length} — <a href="/journal.csv">export tracker (CSV)</a></li>
-<li>pi: <code>${escapeHtml(resolvePi(cfg).desc)}</code></li>
+<li>AI provider: <code>${escapeHtml(providerSummary(cfg))}</code></li>
 <li>Chrome (PDF): <code>${escapeHtml(findChrome(cfg) || 'not found')}</code></li></ul>
 <h2>Install or reload the extension in your usual browser</h2>
 <ol><li>Open <code>chrome://extensions</code> and enable Developer mode.</li>
@@ -689,7 +692,7 @@ route('GET', '/', ({ res }) => {
 <li>Pin <b>ApplyPilot</b> in the <b>Extensions (🧩)</b> menu, then click its icon.</li>
 <li>Edit contact details and availability in <b>Profile</b>. Choose <b>English / Français</b> below the header; this never changes the language of your letters or form answers.</li></ol>
 <p><b>Apply / sign in</b> reuses valid Workday sessions and already open forms. Chrome manages passwords; CAPTCHA, MFA and submission remain manual.</p>
-<p><b>Stop</b> cancels pending autofill and pi answers. Existing entries are preserved. After an update, reload ApplyPilot and reopen its panel — <b>do not reload an unsaved Workday form</b>.</p>
+<p><b>Stop</b> cancels pending autofill and AI answers. Existing entries are preserved. After an update, reload ApplyPilot and reopen its panel — <b>do not reload an unsaved Workday form</b>.</p>
 </body></html>`;
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
@@ -759,14 +762,14 @@ server.listen(cfg.server.port, cfg.server.host, () => {
   for (const f of created) console.log(`  + created: ${f} (complete your details)`);
   console.log(`  Profile : ${PROFILE_FILE}`);
   console.log(`  CVs     : ${cvs.length} found in ${cfg.cvDir || '(not configured)'}${error ? `  ⚠️  ${en(error)}` : ''}`);
-  console.log(`  pi      : ${resolvePi(cfg).desc}`);
+  console.log(`  AI      : ${providerSummary(cfg)}`);
   console.log(`  Chrome  : ${findChrome(cfg) || 'not found (PDF unavailable)'}`);
   if (warnings.length) console.log(`  Complete your profile: ${warnings.map((w) => en(w.label)).join(', ')}`);
   console.log('\n  Keep this window open while applying. Ctrl+C to stop.\n');
 });
 
 async function shutdown() {
-  cancelAllPi();
+  cancelAll();
   await closeBrowser();
   process.exit(0);
 }

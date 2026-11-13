@@ -355,7 +355,7 @@ Posting End Date 2026-10-14`,
     console.log('Cancellation — HTTP disconnect must stop pi (fake CLI, no provider quota)');
     const originalConfig = fs.readFileSync(TEST_CONFIG, 'utf8');
     const markerDir = path.join(OUT, 'fake-pi');
-    fs.appendFileSync(TEST_CONFIG, `llm:\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`);
+    fs.appendFileSync(TEST_CONFIG, `llm:\n  provider: pi\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`);
     const controller = new AbortController();
     let cancelledPid;
     try {
@@ -393,6 +393,21 @@ Posting End Date 2026-10-14`,
     } finally {
       controller.abort();
       fs.writeFileSync(TEST_CONFIG, originalConfig);
+    }
+
+    console.log('Fournisseur Claude CLI (fake-claude, sans quota)');
+    const piConfig = fs.readFileSync(TEST_CONFIG, 'utf8');
+    fs.appendFileSync(TEST_CONFIG, `llm:\n  provider: claude\n  claude:\n    command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-claude.mjs').replace(/\\/g, '/'))}\n    model: claude-sonnet-5-5\n    effort: { letter: high }\n`);
+    try {
+      const health = await api('GET', '/health');
+      check('/health exposes the claude provider with version and effort', health.data.llm?.provider === 'claude' && health.data.llm.available === true && health.data.llm.version.startsWith('2.1.323') && health.data.llm.effort.letter === 'high' && health.data.llm.model === 'claude-sonnet-5-5');
+      check('/health keeps the legacy generation fields', health.data.generation?.letter?.requestedModel === 'claude-sonnet-5-5' && health.data.generation.letter.requestedThinking === 'high');
+      const viaClaude = await api('POST', `/applications/${app.id}/letter`, { language: 'en' });
+      const g = viaClaude.data.letter?.generation;
+      check('letter generation through claude records provider, observed model and effort', viaClaude.status === 200 && g?.providerKind === 'claude-cli' && g.provider === 'anthropic' && g.model === 'claude-sonnet-5-5' && g.requestedModel === 'claude-sonnet-5-5' && g.requestedThinking === 'high' && g.attempts === 1 && typeof g.costUsd === 'number');
+      check('claude letter has a PDF and no reasoning leaked', !!viaClaude.data.letter?.fileName && !JSON.stringify(viaClaude.data).includes('PRIVATE_REASONING_CANARY'));
+    } finally {
+      fs.writeFileSync(TEST_CONFIG, piConfig);
     }
 
     if (WITH_LLM) {

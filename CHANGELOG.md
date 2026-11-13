@@ -3,7 +3,38 @@
 All published changes are tracked here. ApplyPilot uses Semantic Versioning; `0.x` is still pre-stable. Release tags are immutable.
 
 
+
+## [0.8.0] — Unreleased local update
+
+0.7.0 was never published, so its section below is still unreleased and ships together with 0.8.0. The latest public release remains 0.6.0.
+
+### Added
+- Search locations: Greater Toronto and United States scopes, plus a new default "Montréal + Canada first, then Toronto and United States" scope. Montréal and remote-Canada queries always come first; Toronto and the US each get one all-domain query only from spare budget (1 per 4 queries), and ranking scores Montréal above the rest of Canada above other locations. Saved search settings keep their scope.
+- Claude Code CLI provider (`llm.provider: claude`): letters, open-question answers and CV tailoring run `claude -p` non-interactively with no tools, no session persistence, no CLAUDE.md/skills/hooks/MCP (`--safe-mode`, `--strict-mcp-config`) and a short fixed system prompt, using your existing Claude login. Default model `claude-sonnet-5-5`, requested effort `medium` per task (`llm.claude.effort.letter/answers/tailor`). The effective effort is not reported by the CLI. `--bare` is never used. JSON schemas constrain the three task outputs, and generation provenance records the requested and observed model and the reported cost; no reasoning is stored.
+- `/health` reports the active provider, availability, CLI version, model and effort, neutral to the provider. Existing fields are kept for the 0.7 extension.
+- Side panel: Settings view (header gear) with interface language, server URL and read-only provider/model/effort from `/health`; Profile moves to a header icon.
+- Application tab as a four-step stepper (Posting, Documents, Autofill, Submission) with one open step and one-line summaries; a sticky bottom action bar shows the main action of the current context; secondary tools (such as the form diagnostic) sit under "Advanced tools".
+- One-line AI provenance (model, effort, cost) with details behind an info tooltip; shorter warnings, with the "never submits" rule kept next to the Submit step.
+- Design tokens, uniform components and dark mode following the browser setting; new screenshots in `docs/prototype/`.
+
+### Changed
+- The side panel code is split into modules (state, API, tabs, UI, one module per view) with no behaviour change.
+- Interface wording says "the AI" or shows the configured model instead of hard-coding pi.
+- The language selector moved from below the header to Settings. Stop for autofill and search now lives in the bottom action bar instead of the header.
+- The previous `llm.command`, `llm.model`, `llm.letterThinking` and `llm.answersThinking` keys are still read as pi settings when `llm.pi` is absent.
+
+### Upgrade notes
+- **Provider auto-selection.** Without an explicit `llm.provider`, a `config.yaml` that already configures pi (flat keys `llm.command`, `llm.model`, `llm.letterThinking` or `llm.answersThinking`, or a customised `llm.pi.*`) stays on pi. Claude is chosen automatically only when no pi setting is present and the `claude` binary is found. Set `llm.provider: claude` to switch deliberately.
+- **Claude Code required for the Claude provider.** Install it, run `claude` once and sign in with `/login`. It needs a version that supports `--effort` and `--safe-mode`; 0.8.0 was verified with Claude Code 2.1.323 and 2.1.325. No `npm ci` is needed (no new dependency); restart the server and reload the extension.
+- **Billing.** If `ANTHROPIC_API_KEY` is set in the environment that starts the server, the Claude CLI bills the API instead of your subscription. Unset it to use the subscription.
+- Letters already generated keep their original attribution. pi remains supported and optional.
+
+
 ## [0.7.0] — Unreleased local update
+
+### Search updates
+- Search opens sorted by newest publication date; relevance/oldest-first options remain, and unknown publication dates stay last.
+- Explicit FR/EN Clear catalog action removes all discoveries (including saved/hidden links), with confirmation, exact private backup and an ID-snapshot guard against concurrent additions/removals. Application records, CVs, letters and search settings are preserved.
 
 ### Added
 - Selected-CV inspector in the Application tab: PDF preview in a new tab, current filename/modification time/size, copyable source path and explicit file-manager action.

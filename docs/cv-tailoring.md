@@ -37,7 +37,7 @@ Per application, in `data/applications/<id>/cv-tailored/`: `CV.pdf`, `main.tex`,
 
 The Application tab shows a **CV tailored to the posting** card under the selected CV:
 
-1. **Tailor the CV to this posting** asks for confirmation (it uses your normal pi quota) and can be stopped.
+1. **Tailor the CV to this posting** asks for confirmation (it uses your normal AI provider quota) and can be stopped.
 2. **Changes** shows the About text before/after, the reordered skill rows and any model warnings. **Preview** opens the PDF.
 3. **Use this tailored CV for this application's forms** is off by default and per copy. When on, both **Fill this page** and **Prepare and attach CV + letter** upload the tailored PDF (same neutral filename) instead of the base PDF.
 4. A copy becomes **out of date** when the source CV, the posting or the selected CV changes. It then cannot be newly enabled, and forms refuse to upload it until you regenerate it or switch it off. Nothing is silently replaced by the base CV.

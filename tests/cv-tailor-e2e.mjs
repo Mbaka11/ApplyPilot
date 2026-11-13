@@ -1,6 +1,7 @@
 // Real-extension test of the per-posting CV copy: fake model, fake LaTeX, fictional CV. No provider quota.
 import fs from 'node:fs';
 import path from 'node:path';
+import { openStep } from './panel-steps.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const ABOUT = 'I like turning machine learning into tools people actually use, especially models that must run reliably on real data. I learn by building, and I enjoy working with business teams. I am looking for an internship where I can own a problem end to end.';
@@ -29,7 +30,8 @@ export async function testCvTailor({ panel, sw, apiBase, out, restoreId, check, 
     panel.on('dialog', accept);
     try {
       await panel.$eval(`[data-activate="${id}"]`, element => setTimeout(() => element.click(), 0));
-      await panel.waitForFunction(applicationId => document.querySelector('#cvTailor .cv-tailor') && document.querySelector('#cvInspector')?.textContent.length > 0, {}, id);
+      await panel.waitForFunction(applicationId => document.querySelector('#stepper')?.dataset.appId === applicationId && document.querySelector('#cvTailor .cv-tailor') && document.querySelector('#cvInspector')?.textContent.length > 0, {}, id);
+      await openStep(panel, 'docs');
     } finally { panel.off('dialog', accept); }
   };
   const text = () => panel.$eval('#cvTailor', element => element.textContent);
@@ -56,12 +58,12 @@ export async function testCvTailor({ panel, sw, apiBase, out, restoreId, check, 
     await panel.click('[data-ct-action="tailor"]');
     await panel.waitForFunction(() => document.querySelector('#cvTailor')?.textContent.includes('Tailored on'), { timeout: 30000 });
     const saved = (await api('GET', `/applications/${app.id}`)).application;
-    check('the confirmation names the CV and posting and warns about quota', message.includes('Zz Tailor CV EN') && message.includes('Nordic Analytics') && message.includes('normal pi quota'));
+    check('the confirmation names the CV and posting and warns about quota', message.includes('Zz Tailor CV EN') && message.includes('Nordic Analytics') && message.includes('normal AI quota'));
     check('one request saves a one-page copy; status and original CV are unchanged', markers().size === before + 1 && saved.cvTailored?.pages === 1 && saved.cvTailored.useForForms === false && saved.status === 'en cours' && fs.readFileSync(texFile, 'utf8') === sample);
     await panel.$eval('#cvTailor details', element => { element.open = true; });
     const reviewed = await text();
     check('the review shows the before and after About text and the model warning', reviewed.includes('I like turning machine learning into tools people actually use, especially where good ideas') && reviewed.includes('models that must run reliably on real data') && reviewed.includes('Check the wording.'));
-    await (await panel.$('#appCard')).screenshot({ path: path.join(out, 'cv-tailor-en.png') });
+    await (await panel.$('#cvCard')).screenshot({ path: path.join(out, 'cv-tailor-en.png') });
     check('the tailored copy is not used for forms until the user opts in', !(await panel.$eval('[data-ct-use]', element => element.checked)));
 
     const tabsBefore = await sw.evaluate(() => chrome.tabs.query({}).then(tabs => tabs.map(tab => tab.id)));
@@ -109,6 +111,7 @@ export async function testCvTailor({ panel, sw, apiBase, out, restoreId, check, 
     check('discarding removes the copy and leaves the original CV', !discarded.cvTailored && !fs.existsSync(path.join(out, 'data', 'applications', app.id, 'cv-tailored')) && fs.readFileSync(texFile, 'utf8') === sample);
 
     await panel.select('#uiLanguage', 'fr');
+    await panel.waitForFunction(() => document.querySelector('#cvTailor')?.textContent.includes('Adapter le CV à cette offre'));
     check('the tailoring card is available in French', (await text()).includes('Adapter le CV à cette offre'));
     await panel.select('#uiLanguage', 'en');
     await panel.setViewport({ width: 320, height: 1000 });

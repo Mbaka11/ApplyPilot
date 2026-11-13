@@ -1,10 +1,10 @@
 # ApplyPilot
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
 ![Chrome extension](https://img.shields.io/badge/Chrome-Manifest_V3-green)
 ![Interface](https://img.shields.io/badge/interface-English_%2F_Fran%C3%A7ais-purple)
 
-> **Local 0.7.0 update — not published yet.** Adds selected-CV inspection, an opt-in local form diagnostic and partial SuccessFactors automation, including an explicit CV/cover-letter preparation and attachment action. The latest public release is [0.6.0](https://github.com/Mbaka11/ApplyPilot/releases/tag/v0.6.0).
+> **Local 0.8.0 update — not published yet.** Adds a Claude Code CLI provider (pi stays optional), a redesigned side panel with an application stepper, Settings and dark mode, plus the unpublished 0.7.0 work: selected-CV inspection, an opt-in local form diagnostic and partial SuccessFactors automation, including an explicit CV/cover-letter preparation and attachment action. The latest public release is [0.6.0](https://github.com/Mbaka11/ApplyPilot/releases/tag/v0.6.0).
 
 > **LinkedIn integration is experimental.** Its public surface returned 200 during an initial probe, then 429 during connector validation. It is **not a reliable or officially supported integration**. Version 0.6.0 includes the bounded connector with these limitations, not a claim of production readiness. See the [investigation and verification notes](docs/prototype.md).
 
@@ -12,7 +12,7 @@
 
 - 🏠 **Contextual home** — discovery, current-page actions, tracking counts and explicit resumption; no forced return to the last application.
 - 🔍 **Internship discovery** — job-link classification, platform badges and separate provenance filters. Bounded Google collection, an experimental public LinkedIn connector, and manual imports share a catalog independent of applications.
-- 📄 **Tailored cover letters** — pi drafts editable, one-page PDFs using the posting and your CV source. See the requested model/effort before generation and the model reported by pi afterward; old letters are not assigned invented metadata.
+- 📄 **Tailored cover letters** — Claude drafts (or pi, if you choose it) editable, one-page PDFs using the posting and your CV source. See the requested model/effort before generation and the model reported afterward; old letters are not assigned invented metadata.
 - ✍️ **Form autofill** — Workday is the priority: contact details, addresses, phone numbers, experience, education, dates, eligibility questions, languages and websites. Generic forms, including Greenhouse- and Lever-style pages, are also supported. [SuccessFactors support is partial](docs/successfactors.md): ARIA controls, question matching and a guarded document-upload workflow. Repeated education/language sections remain manual.
 - 📎 **Attachments** — select an appropriate French, English or specialized CV; attach it, your cover letter and your configured transcript when relevant.
 - 📑 **Prepare and attach CV + cover letter (SuccessFactors)** — confirm the destination, generate a missing letter and PDF, then transfer the selected documents through recognized upload dialogs. Existing files/drafts are preserved; uncertain uploads stop for review. Requires the updated local server; never submits the application.
@@ -23,8 +23,9 @@
 - 🔁 **Answer memory** — reuse answers to recurring questions on future applications.
 - ⚙️ **Profile editor** — update contact details, availability and eligibility answers, with private backups and conflict protection.
 - 🔎 **Posting checklist** — identify transcripts, credited internships, GPA thresholds, language requirements, on-site work, checks, pay and deadlines.
-- 🌐 **English / Français interface** — switch at any time. The preference is remembered; it does not change posting, CV, answer or cover-letter languages.
-- ⏹️ **Stop autofill** — cancel pending pi answers and browser operations, preserve completed fields, and continue on the next step.
+- 🌐 **English / Français interface** — switch at any time in **Settings** (header gear). The preference is remembered; it does not change posting, CV, answer or cover-letter languages.
+- 🧭 **Guided application** — a four-step stepper (Posting, Documents, Autofill, Submission) with a sticky bottom action bar for the main action, plus light/dark themes that follow the browser.
+- ⏹️ **Stop autofill** — cancel pending AI answers and browser operations, preserve completed fields, and continue on the next step.
 
 > ApplyPilot **never clicks Submit**. It fills, highlights what needs review, and leaves submission to you.
 
@@ -40,13 +41,13 @@
  │ Job posting / application form│         │ ApplyPilot server (127.0.0.1)         │
  │   ↑ fills browser fields      │         │ • profile.yaml                        │
  │ ApplyPilot side panel ────────┼── HTTP ►│ • CV folder (.pdf + .tex)             │
- │   analyze · letter · autofill │         │ • pi --print → letters and answers    │
+ │   analyze · letter · autofill │         │ • claude -p (or pi) → letters/answers │
  └───────────────────────────────┘         │ • headless Chrome → cover-letter PDFs │
                                            │ • data/ → tracker and answer memory   │
                                            └───────────────────────────────────────┘
 ```
 
-The extension does not directly read your local files or call the model. The local server reads your profile and CVs, invokes [pi](https://pi.dev) non-interactively with your existing authentication, renders PDFs with Chrome, and maintains the tracker. **No additional API key is required**, but your configured provider’s usage limits and costs still apply.
+The extension does not directly read your local files or call the model. The local server reads your profile and CVs, invokes the [Claude Code](https://claude.com/claude-code) CLI (`claude -p`, no tools, no session) non-interactively with your existing Claude login — or [pi](https://pi.dev) if you select it — renders PDFs with Chrome, and maintains the tracker. **No additional API key is required**, but your subscription’s usage limits and costs still apply.
 
 Cover letters use **HTML → Chrome PDF**, not LaTeX. Existing LaTeX CV sources help the model understand your CV; the extension does not regenerate your CVs.
 
@@ -56,7 +57,10 @@ Requirements:
 
 - **Node.js 20+**
 - **Google Chrome** or a compatible Chromium browser such as Edge
-- **[pi](https://pi.dev)** installed and authenticated with a model provider; alternatively, set `llm.command` in `config.yaml`
+- **[Claude Code](https://claude.com/claude-code)** installed and signed in (run `claude`, then `/login`). A recent version is needed for `--effort` and `--safe-mode`; 0.8.0 was verified with 2.1.323/2.1.325.
+- Optional: **[pi](https://pi.dev)**, authenticated with a model provider, if you set `llm.provider: pi`
+
+If `ANTHROPIC_API_KEY` is set in the environment that starts the server, the Claude CLI bills the API instead of your subscription. Without an explicit `llm.provider`, an older `config.yaml` that configures pi (`llm.command`, `llm.model`, `letterThinking`, `answersThinking`) stays on pi; otherwise ApplyPilot uses Claude when `claude` is found and pi when it is not. Set `llm.provider: claude` to switch.
 
 1. **Clone the repository.**
    ```sh
@@ -91,7 +95,7 @@ Leave **Overwrite existing fields** unchecked. **Do not press F5 on a form with 
 
 ### Find internships
 
-Open **Search**, review the internship keywords, AI/software/data/consulting domains, area and term, then choose **Search Google**. Default geography is **Greater Montréal + remote Canada**; the term comes from your availability and remains editable. Preview the exact queries before running them.
+Open **Search**, review the internship keywords, AI/software/data/consulting domains, area and term, then choose **Search Google**. Default geography is **Montréal + remote Canada first, then Toronto and the United States** (Toronto/US only use spare query budget and rank lower; Greater Montréal only, Quebec, Canada, Greater Toronto and United States are also available); the term comes from your availability and remains editable. Preview the exact queries before running them.
 
 - One dedicated, inactive tab per run; **1–8 queries**, at most **30 links per page**, no automatic result visits or pagination.
 - **Stop search** works from every panel tab. Keep the panel open while searching; closing it also stops the run. Completed catalog batches remain saved, and the search tab is left open for inspection.
@@ -102,13 +106,13 @@ Open **Search**, review the internship keywords, AI/software/data/consulting dom
 - **Sort by** relevance or publication date (newest/oldest first). Publication dates are mainly available for public LinkedIn results; undated offers stay at the bottom in both date orders, without substituting discovery dates.
 - Ranking is a simple keyword score, not an eligibility or vacancy check. Google can block collection or change its markup; there is no bypass and no exhaustive-results guarantee.
 
-Search does not invoke pi or send your CV/contact details to a model. Google queries go through a dedicated browser tab; experimental LinkedIn queries go directly from the server. See the [search workflow, limits, privacy and API contract](docs/search.md).
+Search does not invoke the AI provider or send your CV/contact details to a model. Google queries go through a dedicated browser tab; experimental LinkedIn queries go directly from the server. See the [search workflow, limits, privacy and API contract](docs/search.md).
 
 <details><summary>Search preview (fictional fixtures, not evidence of live LinkedIn success)</summary><img src="docs/prototype/search.png" width="360" alt="Experimental discovery UI with synthetic postings"></details>
 
 ### Prepare an application
 
-1. Start from **Home**. Analyze the current posting or explicitly resume a recent application. The selected application remains active through form steps; reopening the panel does not resume it automatically. **Leave this application** returns home without changing its tracker status. The recommended CV is preselected (★).
+1. Start from **Home**. Analyze the current posting or explicitly resume a recent application. The **Application** tab is a stepper (Posting, Documents, Autofill, Submission); one step is open at a time and the sticky bottom bar offers the main action. The selected application remains active through form steps; reopening the panel does not resume it automatically. **Leave this application** returns home without changing its tracker status. The recommended CV is preselected (★).
 2. **Generate cover letter**; allow roughly 20–60 seconds. Review the draft and warnings, edit it in the panel, then click **Update PDF**. You can choose French or English independently of the interface.
 3. Click **Apply / sign in**, then **Fill this page** on each step:
    - 🟩 **Green:** filled from your profile.
@@ -121,9 +125,9 @@ Search does not invoke pi or send your CV/contact details to a model. Google que
 
 An incorrect submission mark can be reversed by selecting **In progress** in the tracker; the erroneous submission date is cleared.
 
-**Generation provenance:** the letter card distinguishes settings for the next call from the previous generation. Pi's JSON assistant events supply the reported provider/model. The requested reasoning level is retained, but **pi does not report the effective level**; neither private reasoning blocks nor signatures are stored or displayed. Legacy/manual letters show unknown attribution. Subsequent manual edits retain provenance and are labelled accordingly. Changing applications or regenerating asks before discarding a draft.
+**Generation provenance:** the letter card shows one line (model, effort, cost when reported) with details in an info tooltip, and distinguishes settings for the next call from the previous generation. The CLI’s JSON output (or pi’s assistant events) supplies the reported model. The requested effort is retained, but **the effective level is not reported**; neither private reasoning blocks nor signatures are stored or displayed. Legacy/manual letters show unknown attribution. Subsequent manual edits retain provenance and are labelled accordingly. Changing applications or regenerating asks before discarding a draft.
 
-<details><summary>Letter provenance preview (fake pi, no provider quota)</summary><img src="docs/prototype/letter.png" width="360" alt="Requested settings and observed model attribution for a synthetic cover letter"></details>
+<details><summary>Letter provenance preview (fake model, no provider quota)</summary><img src="docs/prototype/letter.png" width="360" alt="Requested settings and observed model attribution for a synthetic cover letter"></details>
 
 ### Inspect the selected CV
 
@@ -137,13 +141,13 @@ This inspects the **current source PDF**, not a document previously uploaded to 
 
 ### Stop a blocked autofill
 
-Click **Stop** while autofill or pi answers are running. The panel immediately becomes available, the request is aborted, the owned pi process is terminated, and completed fields remain intact. Stop does not undo values already entered.
+Click **Stop** in the bottom action bar while autofill or AI answers are running. The panel immediately becomes available, the request is aborted, the owned model process is terminated, and completed fields remain intact. Stop does not undo values already entered.
 
-Changing tabs, navigating, or changing Workday steps cancels the previous run. Late answers cannot be written into a different step. Waiting for AI answers also stops after 90 seconds; retry or disable **Let pi answer remaining questions** to continue manually.
+Changing tabs, navigating, or changing Workday steps cancels the previous run. Late answers cannot be written into a different step. Waiting for AI answers also stops after 90 seconds; retry or disable **Let the AI answer remaining questions** to continue manually.
 
 ### Interface language
 
-Choose **English** or **Français** below the header. On first use, a French browser defaults to French; other browser languages default to English. Your explicit choice is saved locally.
+Open **Settings** (gear icon in the header) and choose **English** or **Français**; **Profile** is the neighbouring icon. Settings also shows the active AI provider, model and effort read-only from the server; edit `config.yaml` to change them. On first use, a French browser defaults to French; other browser languages default to English. Your explicit choice is saved locally.
 
 Switching language changes system labels, dates, status displays, confirmations and feedback. It preserves unsaved profile fields, server URL edits, letter drafts and instructions, search filters and manual-import drafts. It does **not** translate or save your profile values, employer content, remembered answers, CVs or cover letters. Existing tracker status identifiers remain compatible.
 
@@ -179,7 +183,7 @@ Editing a profile does not update existing CV PDFs or cover letters. Keep study 
 
 - **Local-first storage:** the server binds to `127.0.0.1` and checks `Host` and `Origin` to reject website-originated API requests.
 - `profile.yaml`, `config.yaml`, `data/`, credentials and test outputs are excluded from Git.
-- **AI is not offline:** relevant posting, profile, CV and letter information is sent to the provider configured in pi to generate text. Its privacy policy and usage limits apply.
+- **AI is not offline:** relevant posting, profile, CV and letter information is sent to the provider configured in `llm.provider` (Claude Code or pi) to generate text. Its privacy policy and usage limits apply.
 - Search terms go to Google or the experimental public LinkedIn endpoint when you start that source. The connector omits credentials; manual browser navigation can use the current website session. No LinkedIn content scripts, credential export or account automation are used.
 - The discovery catalog lives in `data/search/discovery.json`, independently of applications. Its first schema-2 mutation saves an exact private schema-1 backup; read-only views do not migrate it. Imported text stays local unless explicitly used in another workflow.
 - Passwords, CAPTCHA, signatures and consent controls are never completed automatically.
@@ -195,7 +199,9 @@ Sites vary. Unusual widgets can remain incomplete and need manual input. Workday
 | Key | Purpose |
 |---|---|
 | `cvDir`, `cvs[]` | CV folder; language, display name and keywords for each variant |
-| `llm.model`, `llm.letterThinking` | pi model (blank uses its default) and reasoning level |
+| `llm.provider` | `claude` or `pi`; blank = pi if pi settings are present, else claude when the CLI is found, else pi |
+| `llm.claude.command`, `.model`, `.effort.letter/answers/tailor` | Claude CLI path (blank = PATH), model (default `claude-sonnet-5-5`) and requested effort per task (default `medium`) |
+| `llm.pi.command`, `.model`, `.letterThinking`, `.answersThinking` | pi settings; the former flat `llm.command/model/letterThinking` keys are still read |
 | `letter.paper`, `letter.showHeader` | Letter/A4 paper and contact header |
 | `letter.fileNameFr` / `fileNameEn` | PDF filenames, e.g. `{first}_{last}_Cover_Letter_{company}.pdf` |
 | `fill.attachLetterWithCv` | Also attach the letter in a CV field when it accepts multiple files |
@@ -234,7 +240,7 @@ The bump command synchronizes release metadata and opens a changelog section. It
 | **Server offline** | Run `start.cmd`, then click the connection badge |
 | Extension/server versions differ | Restart the server; reload the extension and reopen its panel |
 | Update appears to do nothing | Reload ApplyPilot in `chrome://extensions`, close/reopen the panel and retry; do not reload an unsaved form |
-| pi answers are taking too long | Click **Stop**; fill the next step or turn off AI |
+| AI answers are taking too long | Click **Stop**; fill the next step or turn off AI |
 | Workday says City is required despite showing a value | Reload the extension, not Workday, and run autofill again |
 | Skills search is typed but nothing is selected | Update ApplyPilot and retry: only verified pills count as selected |
 | Search asks to restart the server | Restart it, reload ApplyPilot in `chrome://extensions`, then reopen the panel; do not reload Workday |
@@ -244,7 +250,9 @@ The bump command synchronizes release metadata and opens a changelog section. It
 | No profile editor | Restart the server and reload the extension |
 | Workday asks you to sign in again | Check the Chrome profile and employer portal; the session may have expired |
 | Cannot write a PDF | Close the file in Acrobat or another PDF reader |
-| pi authentication error | Run `pi` in a terminal and check `/login` |
+| Claude authentication error or `claude` not found | Run `claude` in a terminal, then `/login`; set `llm.claude.command` if it is not on PATH |
+| Unexpected API charges | Unset `ANTHROPIC_API_KEY` before starting the server so the CLI uses your subscription |
+| pi authentication error (`provider: pi`) | Run `pi` in a terminal and check `/login` |
 | Excel displays incorrect accents | CSV uses `;` and UTF-8 with BOM; import it as a text/CSV file if needed |
 
 ## Tests
@@ -258,16 +266,16 @@ npm run test:cv              # file metadata, simulated native launches and insp
 set APPLYPILOT_TEST_LLM=1 && npm run test:server   # Windows
 ```
 
-Default tests use fictional profiles, simulated employer forms and a fake pi CLI. They check English/French preferences and drafts, actual subprocess cancellation, late-answer rejection, focus, asynchronous selection, recreated controls, collapsed pills and reinjection without navigation. Discovery tests also cover link classification, source filters, schema backups, aliases, manual precedence, limits/corruption, HTTP cooldowns/cancellation, challenge stops, tab ownership and independent application state. Fake pi JSON events verify model provenance without retaining reasoning blocks. New discovery tabs are intercepted before navigation, with synthetic Google/LinkedIn pages served locally. Tests never use real candidate data or contact an employer to submit anything.
+Default tests use fictional profiles, simulated employer forms and fake Claude and pi CLIs. They check English/French preferences and drafts, actual subprocess cancellation, late-answer rejection, focus, asynchronous selection, recreated controls, collapsed pills and reinjection without navigation. Discovery tests also cover link classification, source filters, schema backups, aliases, manual precedence, limits/corruption, HTTP cooldowns/cancellation, challenge stops, tab ownership and independent application state. Fake CLI output verifies model provenance without retaining reasoning blocks. New discovery tabs are intercepted before navigation, with synthetic Google/LinkedIn pages served locally. Tests never use real candidate data or contact an employer to submit anything.
 
 ## Project layout
 
 ```text
 extension/          Chrome MV3 extension: side panel and content scripts
   content/          DOM, extraction, field inventory, widgets, matching, Workday, commands
-  sidepanel/        UI, localization and navigation
+  sidepanel/        Side panel: state, API, tabs, UI helpers and per-view modules
   search/           Query planning, safe Google collection, runner and catalog UI
-server/src/         Local server: configuration, CVs, pi, letters/PDFs, tracker, memory, discovery
+server/src/         Local server: configuration, CVs, Claude/pi providers, letters/PDFs, tracker, memory, discovery
 scripts/            Icons and release-version synchronization
 tests/              Server, content, end-to-end and cancellation fixtures
 config.example.yaml

@@ -14,6 +14,7 @@ import { testFormDiagnostic } from './form-diagnostic-e2e.mjs';
 import { testSuccessFactors } from './successfactors-e2e.mjs';
 import { testDocumentPreparation } from './document-preparation-e2e.mjs';
 import { testCvTailor } from './cv-tailor-e2e.mjs';
+import { openStep, openFillOptions, fitScreenshot } from './panel-steps.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'tests', 'output', 'e2e');
@@ -41,7 +42,7 @@ async function resumeFromHome(panel, id) {
   const selector = `#tab-home [data-activate="${id}"]`;
   await panel.waitForSelector(selector);
   await panel.click(selector);
-  await panel.waitForSelector('#cvSelect', { visible: true });
+  await panel.waitForSelector('#cvSelect');
 }
 
 function prepareData() {
@@ -51,7 +52,7 @@ function prepareData() {
   fs.writeFileSync(path.join(OUT, 'cvs', 'Marie_Tremblay_CV_FR.pdf'), '%PDF-1.4\n%test\n%%EOF\n');
   fs.writeFileSync(
     path.join(OUT, 'config.yaml'),
-    `cvDir: ${JSON.stringify(path.join(OUT, 'cvs').replace(/\\/g, '/'))}\nstyleDir: ${JSON.stringify(path.join(OUT, 'style').replace(/\\/g, '/'))}\nllm:\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`,
+    `cvDir: ${JSON.stringify(path.join(OUT, 'cvs').replace(/\\/g, '/'))}\nstyleDir: ${JSON.stringify(path.join(OUT, 'style').replace(/\\/g, '/'))}\nllm:\n  provider: pi\n  model: fixture/requested\n  command: ${JSON.stringify(path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs').replace(/\\/g, '/'))}\n`,
   );
   fs.writeFileSync(
     path.join(OUT, 'profile.yaml'),
@@ -166,7 +167,7 @@ async function main() {
     check('CV recommandé (offre en français → CV FR)', /FR/.test(cv), cv);
     const reqs = await panel.$eval('#appCard', (e) => e.querySelector('.reqs')?.textContent || '');
     check('exigences de l’offre affichées (bilinguisme)', /À prévoir/.test(reqs) && /bilinguisme/i.test(reqs), reqs.replace(/\s+/g, ' ').slice(0, 120));
-    check('section lettre affichée', (await panel.$eval('#letterCard', (e) => e.textContent)).includes('Générer la lettre'));
+    check('section lettre affichée, action principale « Générer la lettre » dans la barre', (await panel.$eval('#letterCard', (e) => e.textContent)).includes('Lettre de motivation') && (await panel.$eval('#actionBar [data-action="generate"]', (e) => e.textContent)) === 'Générer la lettre');
 
     // An old active ID and the sole ongoing application no longer force resumption.
     await panel.reload();
@@ -181,6 +182,7 @@ async function main() {
     check('explicit home resumption opens the application', (await panel.$eval('.tab.active', e => e.id)) === 'tab-app');
     const tabsBefore = await sw.evaluate(() => chrome.tabs.query({}).then((tabs) => tabs.length));
     await site.evaluate(() => { window.unsavedTrial = 'conserver'; });
+    await openStep(panel, 'fill');
     await panel.click('[data-action="applyJob"]');
     await sleep(250);
     const tabsAfter = await sw.evaluate(() => chrome.tabs.query({}).then((tabs) => tabs.length));
@@ -203,7 +205,10 @@ async function main() {
     // Switching UI language preserves drafts without writing or translating profile values.
     const profileBeforeSwitch = fs.readFileSync(path.join(OUT, 'profile.yaml'), 'utf8');
     await replaceText(panel, '[data-profile-path="identity.address.city"]', 'Ville brouillon');
+    await panel.click('[data-tab="settings"]');
     await replaceText(panel, '#serverUrl', 'http://127.0.0.1:4900');
+    await panel.click('[data-tab="profile"]');
+    await panel.waitForSelector('[data-profile-path="identity.address.city"]');
     await panel.select('#uiLanguage', 'en');
     await panel.waitForFunction(() => document.querySelector('[data-action="saveProfile"]')?.textContent === 'Save profile');
     check('English profile labels and unknown-answer option are localized', (await panel.$eval('#tab-profile', (e) => e.textContent)).includes('Contact details') && (await panel.$eval('[data-profile-path="workAuthorization.canada.needsSponsorship"]', (e) => e.options[0].textContent)) === 'I will answer myself');
@@ -230,7 +235,7 @@ async function main() {
     await panel.click('[data-tab="profile"]');
     await panel.waitForFunction(() => document.querySelector('[data-profile-path="identity.address.postalCode"]')?.value === 'G1A 1A1');
     check('profil persistant après rechargement', true);
-    await panel.screenshot({ path: path.join(OUT, 'panel-profile-editor.png'), fullPage: true });
+    await fitScreenshot(panel, path.join(OUT, 'panel-profile-editor.png'));
     await panel.click('[data-tab="app"]');
 
     // Explicitly resume after the panel-only reloads above; never reload the form.
@@ -240,6 +245,7 @@ async function main() {
     // Formulaire Workday sur la même offre → la candidature reste active.
     await site.goto(`${FIX_URL}/workday-myinfo.html`);
     await sleep(1500);
+    await openFillOptions(panel);
     await panel.click('#optAi'); // pas d'IA pendant le test
     await panel.click('[data-action="fill"]');
     await panel.waitForFunction(() => !!document.querySelector('#fillCard .summary'), { timeout: 60000 });
@@ -320,7 +326,7 @@ async function main() {
     await panel.click('#optAi');
     const oldPids = fakePids();
     await panel.click('[data-action="fill"]');
-    await panel.waitForFunction(() => document.querySelector('#fillCard .busy')?.textContent.includes('pi répond'), { timeout: 30000 });
+    await panel.waitForFunction(() => document.querySelector('#fillCard .busy')?.textContent.includes('L’IA répond'), { timeout: 30000 });
     for (let i = 0; i < 100 && fakePids().length === oldPids.length; i++) await sleep(50);
     const pendingPid = fakePids().find((pid) => !oldPids.includes(pid));
     check('pending answers really started the fake pi subprocess', !!pendingPid && alive(pendingPid));
@@ -342,14 +348,14 @@ async function main() {
     await sleep(1200);
     await panel.click('#optAi');
     await panel.click('[data-action="fill"]');
-    await panel.waitForFunction(() => document.querySelector('#fillCard .busy')?.textContent.includes('pi répond'), { timeout: 30000 });
+    await panel.waitForFunction(() => document.querySelector('#fillCard .busy')?.textContent.includes('L’IA répond'), { timeout: 30000 });
     await site.$eval('[data-automation-id="progressBarActiveStep"]', (e) => { e.textContent = 'current step 4 of 5 Review'; });
     await panel.waitForSelector('[data-action="fill"]:not([disabled])', { timeout: 5000 });
     check('changing Workday steps without navigation stops the previous AI request', !(await panel.$('#fillCard .busy')));
     await panel.select('#uiLanguage', 'en');
     await panel.waitForFunction(() => document.querySelector('[data-action="fill"]')?.textContent === 'Fill this page');
     await panel.click('[data-action="fill"]');
-    await panel.waitForFunction(() => document.querySelector('#fillCard .busy')?.textContent.includes('pi is answering'), { timeout: 30000 });
+    await panel.waitForFunction(() => document.querySelector('#fillCard .busy')?.textContent.includes('The AI is answering'), { timeout: 30000 });
     check('Stop is also available in English', (await panel.$eval('[data-action="stopFill"]', (e) => e.textContent)) === 'Stop');
     await panel.click('[data-action="stopFill"]');
     await panel.click('#optAi');
@@ -366,11 +372,12 @@ async function main() {
     });
     await panel.reload();
     await resumeFromHome(panel, appId);
+    await openStep(panel, 'docs');
     await panel.waitForSelector('#letterBody', { timeout: 10000 });
     check('éditeur de lettre affiché', (await panel.$eval('#letterBody', (e) => e.value)).startsWith('Madame'));
     const letterBeforeSwitch = (await fetch(`${apiBase}/applications/${appId}`).then((r) => r.json())).application.letter;
     await replaceText(panel, '#letterBody', body + '\n\nBrouillon conservé.');
-    await panel.click('#letterCard details summary');
+    await panel.click('#letterCard details.instructions summary');
     await replaceText(panel, '#letterInstructions', 'Consignes non enregistrées');
     await panel.select('#letterLang', 'en');
     await panel.select('#uiLanguage', 'en');
@@ -386,6 +393,15 @@ async function main() {
     await panel.keyboard.press('KeyA');
     await panel.keyboard.up('Control');
     await panel.type('#letterSubject', 'Candidature modifiée');
+    const refreshed = await panel.evaluate(async () => {
+      const { refreshPage } = await import('./views/application.mjs');
+      const input = document.querySelector('#letterSubject'), details = document.querySelector('#letterCard details');
+      details.open = true; input.focus(); input.setSelectionRange(4, 9);
+      await refreshPage();
+      const now = document.querySelector('#letterSubject');
+      return { sameNode: now === input, focused: document.activeElement === now, start: now.selectionStart, end: now.selectionEnd, value: now.value, detailsOpen: document.querySelector('#letterCard details').open };
+    });
+    check('page refresh keeps the letter fields untouched (focus, caret, typed text, open instructions)', refreshed.focused && refreshed.start === 4 && refreshed.end === 9 && refreshed.value === 'Candidature modifiée' && refreshed.detailsOpen, JSON.stringify(refreshed));
     await panel.click('[data-action="saveLetter"]');
     await panel.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('PDF mis'), { timeout: 30000 });
     const saved = (await fetch(`${apiBase}/applications/${appId}`).then((r) => r.json())).application.letter;
@@ -403,11 +419,13 @@ async function main() {
 
     // Ce bouton ne soumet rien : le journal ne change qu'après confirmation explicite.
     panel.once('dialog', (dialog) => dialog.dismiss());
+    await openStep(panel, 'submit');
     await panel.click('[data-action="submitted"]');
     await sleep(250);
     const unsubmitted = (await fetch(`${apiBase}/applications/${appId}`).then((r) => r.json())).application;
     check('annuler le marquage garde la candidature en cours', unsubmitted.status === 'en cours' && unsubmitted.submittedAt === null);
     panel.once('dialog', (dialog) => dialog.accept());
+    await openStep(panel, 'submit');
     await panel.click('[data-action="submitted"]');
     await sleep(800);
     const { applications } = await fetch(`http://127.0.0.1:${API_PORT}/applications`).then((r) => r.json());
@@ -418,10 +436,10 @@ async function main() {
     await panel.click('[data-tab="profile"]');
     await panel.waitForFunction(() => document.querySelector('#tab-profile')?.textContent.includes('CV (2)'), { timeout: 5000 });
     check('onglet profil', true);
-    await panel.screenshot({ path: path.join(OUT, 'panel-profile.png'), fullPage: true });
+    await fitScreenshot(panel, path.join(OUT, 'panel-profile.png'));
     await panel.click('[data-tab="app"]');
     await sleep(300);
-    await panel.screenshot({ path: path.join(OUT, 'panel.png'), fullPage: true });
+    await fitScreenshot(panel, path.join(OUT, 'panel.png'));
 
     // English public screenshots: only this isolated fictional profile/server is used.
     const demoProfile = await fetch(`${apiBase}/profile`).then((r) => r.json());
@@ -438,9 +456,14 @@ async function main() {
     });
     await panel.select('#uiLanguage', 'en');
     await site.goto(`${FIX_URL}/posting-en.html`);
-    await panel.waitForFunction(() => document.querySelector('#pageCard [data-action="analyze"]')?.textContent === 'Analyze this posting', { timeout: 10000 });
+    await panel.waitForFunction(() => document.querySelector('#actionBar [data-action="analyze"]')?.textContent === 'Analyze this posting', { timeout: 10000 });
+    await fitScreenshot(panel, path.join(OUT, 'application-offer-en.png'));
+    await panel.click('[data-tab="home"]');
+    await panel.waitForSelector('#tab-home [data-action="analyze"]');
+    await fitScreenshot(panel, path.join(OUT, 'home-posting-en.png'));
+    await panel.click('[data-tab="app"]');
     panel.once('dialog', dialog => dialog.accept());
-    await panel.click('#pageCard [data-action="analyze"]');
+    await panel.click('#actionBar [data-action="analyze"]');
     await panel.waitForFunction(() => document.querySelector('#appCard h3')?.textContent.includes('Machine Learning'), { timeout: 10000 });
     check('English posting recommends English CV independently of the interface', (await panel.$eval('#cvSelect', (e) => e.value)).endsWith('_EN'));
     const englishApp = (await fetch(`${apiBase}/applications`).then((r) => r.json())).applications.find((a) => a.company === 'Nordic Analytics');
@@ -460,7 +483,7 @@ async function main() {
     await panel.waitForFunction(() => !document.querySelector('#fillCard .busy') && !!document.querySelector('#fillCard .summary'), { timeout: 30000 });
     check('English feedback uses localized review and filled labels', /filled/.test(await panel.$eval('#fillCard .summary', (e) => e.textContent)));
     await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
-    await panel.screenshot({ path: path.join(OUT, 'panel-en.png'), fullPage: true });
+    await fitScreenshot(panel, path.join(OUT, 'panel-en.png'));
     // Foreground each fixture before capture: background compositing can stall
     // Page.captureScreenshot in headless Chrome on Windows.
     await site.bringToFront();
@@ -468,15 +491,18 @@ async function main() {
     await panel.bringToFront();
     await panel.click('[data-tab="profile"]');
     await panel.waitForFunction(() => document.querySelector('[data-profile-path="identity.address.line1"]')?.value === '456 Example Street');
-    await panel.evaluate(() => window.scrollTo(0, 0));
-    const profileHeight = await panel.$eval('#tab-profile .card', (e) => Math.ceil(e.getBoundingClientRect().bottom + 12));
-    await panel.setViewport({ width: 420, height: profileHeight });
-    await panel.screenshot({ path: path.join(OUT, 'profile-en.png'), fullPage: false });
+    await fitScreenshot(panel, path.join(OUT, 'profile-en.png'));
+    await panel.click('[data-tab="settings"]');
+    await panel.waitForSelector('#uiLanguage');
+    await fitScreenshot(panel, path.join(OUT, 'settings-en.png'));
+    await panel.click('[data-tab="journal"]');
+    await panel.waitForSelector('#tab-journal .list li');
+    await fitScreenshot(panel, path.join(OUT, 'tracker-en.png'));
     await panel.setViewport({ width: 320, height: 1000 });
-    check('version and language selector fit a narrow side panel', await panel.evaluate(() => {
+    check('version, status dot and header buttons fit a narrow side panel', await panel.evaluate(() => {
       const version = document.querySelector('#appVersion').getBoundingClientRect();
-      const language = document.querySelector('#uiLanguage').getBoundingClientRect();
-      return version.left >= 0 && version.right <= innerWidth && language.right <= innerWidth;
+      const settings = document.querySelector('#settingsButton').getBoundingClientRect();
+      return version.left >= 0 && version.right <= innerWidth && settings.right <= innerWidth && [document.documentElement, document.querySelector('main')].every(element => element.scrollWidth <= element.clientWidth);
     }));
     await testSuccessFactors({ panel, site, sw, check });
     await testDocumentPreparation({ panel, site, sw, apiBase, out: OUT, restoreId: englishApp.id, check });
@@ -486,12 +512,13 @@ async function main() {
     await testCvTailor({ panel, sw, apiBase, out: OUT, root: ROOT, restoreId: englishApp.id, check });
 
     // Model attribution uses the fake pi event stream, never provider quota.
+    await openStep(panel, 'docs');
     check('letter UI distinguishes legacy attribution from settings for the next generation', (await panel.$eval('#letterCard', e => e.textContent)).includes('Legacy letter') && (await panel.$eval('#letterCard', e => e.textContent)).includes('fixture/requested'));
     const beforeGeneration = await panel.$eval('#letterSubject', e => e.value);
     panel.once('dialog', dialog => dialog.dismiss());
     await panel.click('[data-action="generate"]');
     check('regeneration can be cancelled without discarding an unsaved draft', (await panel.$eval('#letterSubject', e => e.value)) === beforeGeneration && !(await panel.$('#letterCard .busy')));
-    await panel.$eval('#letterCard details', e => { e.open = true; });
+    await panel.$eval('#letterCard details.instructions', e => { e.open = true; });
     await replaceText(panel, '#letterInstructions', 'SYNTHETIC_INSTRUCTION_CANARY');
     panel.once('dialog', dialog => dialog.accept());
     await panel.click('[data-action="generate"]');
@@ -503,18 +530,21 @@ async function main() {
     check('user instructions are sent before the busy view removes the input', generated.instructions === 'SYNTHETIC_INSTRUCTION_CANARY' && fs.readdirSync(path.join(OUT, 'fake-pi')).some(name => JSON.parse(fs.readFileSync(path.join(OUT, 'fake-pi', name), 'utf8')).instructionsSeen));
     check('private reasoning blocks do not enter saved application data or the UI', !JSON.stringify(generated).includes('PRIVATE_REASONING_CANARY') && !(await panel.$eval('#letterCard', e => e.textContent)).includes('PRIVATE_REASONING_CANARY'));
     await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
-    await panel.screenshot({ path: path.join(OUT, 'letter-provenance-en.png'), fullPage: true });
+    await panel.$eval('#advancedTools', (details) => { details.open = false; });
+    await fitScreenshot(panel, path.join(OUT, 'letter-provenance-en.png'));
+    await fitScreenshot(panel, path.join(OUT, 'application-dark.png'), { theme: 'dark' });
     await replaceText(panel, '#letterBody', generated.body + '\n\nEdited synthetic draft.');
     await panel.click('[data-action="saveLetter"]');
     await panel.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('PDF updated'), { timeout: 30000 });
     const edited = (await fetch(`${apiBase}/applications/${englishApp.id}`).then(r => r.json())).application.letter;
     check('manual PDF edits retain attribution and are marked as subsequent edits', edited.editedAfterGeneration && JSON.stringify(edited.generation) === JSON.stringify(generated.generation));
     const beforeLeave = JSON.stringify((await fetch(`${apiBase}/applications`).then(r => r.json())).applications);
+    await openStep(panel, 'offer');
     await panel.click('[data-action="newApp"]');
     await panel.waitForFunction(() => document.querySelector('.tab.active')?.id === 'tab-home');
     check('leaving an application returns home without deleting or marking it submitted', !(await panel.$('#appCard h3')) && JSON.stringify((await fetch(`${apiBase}/applications`).then(r => r.json())).applications) === beforeLeave);
     await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
-    await panel.screenshot({ path: path.join(OUT, 'home-prototype-en.png'), fullPage: true });
+    await fitScreenshot(panel, path.join(OUT, 'home-prototype-en.png'));
 
     // Server mismatch is shown, without changing the visible extension version.
     await panel.evaluate(() => {
