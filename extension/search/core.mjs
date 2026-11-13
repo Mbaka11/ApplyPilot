@@ -5,11 +5,31 @@ export const CATEGORIES = {
   data: { label: 'Data / Analytique', query: '("data science" OR "data analyst" OR "data engineering" OR analytique)', pattern: /\b(data|analytics|analytique|donnees|business intelligence|bi)\b/i },
   consulting: { label: 'Consulting technologique', query: '(consulting OR consultant OR conseil) (technology OR digital OR ai OR logiciel)', pattern: /\b(consulting|consultant|conseil|advisory|transformation|digital)\b/i },
 };
-export const SCOPES = {
-  montreal_remote: { label: 'Grand Montréal + télétravail Canada', linkedin: 'Greater Montreal Metropolitan Area', google: ['(Montreal OR Montréal OR Laval OR Longueuil OR Brossard)', '(Canada) (remote OR teletravail OR "work from home")'] },
-  quebec: { label: 'Québec', linkedin: 'Quebec, Canada', google: ['(Quebec OR Québec)'] },
-  canada: { label: 'Canada', linkedin: 'Canada', google: ['Canada'] },
+// Places, by priority. `secondary` places get one query covering every selected domain,
+// placed after the Montréal/Canada queries and only when the budget allows it.
+const PLACE = {
+  montreal: { google: '(Montreal OR Montréal OR Laval OR Longueuil OR Brossard)', linkedin: 'Montreal, Quebec, Canada' },
+  canadaRemote: { google: '(Canada) (remote OR teletravail OR "work from home")', linkedin: 'Canada', remote: true },
+  toronto: { google: '(Toronto OR Mississauga OR Markham OR "Richmond Hill")', linkedin: 'Toronto, Ontario, Canada' },
+  usa: { google: '("United States" OR USA OR "New York" OR "San Francisco" OR Boston OR Seattle)', linkedin: 'United States' },
 };
+const scope = (label, linkedin, primary, secondary = []) => ({ label, linkedin, google: primary.map(p => p.google), places: primary, secondary });
+export const SCOPES = {
+  montreal_remote: scope('Grand Montréal + télétravail Canada', 'Greater Montreal Metropolitan Area', [PLACE.montreal, PLACE.canadaRemote]),
+  montreal_plus: scope('Montréal + Canada en priorité, puis Toronto et États-Unis', 'Greater Montreal Metropolitan Area', [PLACE.montreal, PLACE.canadaRemote], [PLACE.toronto, PLACE.usa]),
+  quebec: scope('Québec', 'Quebec, Canada', [{ google: '(Quebec OR Québec)', linkedin: 'Quebec, Canada' }]),
+  canada: scope('Canada', 'Canada', [{ google: 'Canada', linkedin: 'Canada' }]),
+  toronto: scope('Grand Toronto', 'Greater Toronto Area, Canada', [PLACE.toronto]),
+  usa: scope('États-Unis', 'United States', [PLACE.usa]),
+};
+/** Secondary places take at most one slot per 4 queries, always after the priority ones. */
+function placePlan(options) {
+  const { places, secondary } = SCOPES[options.scope];
+  const extra = secondary.slice(0, Math.floor(options.maxPages / 4));
+  const primary = options.categories.flatMap(category => places.map(place => ({ category, categories: [category], place })));
+  return [...primary.slice(0, options.maxPages - extra.length), ...extra.map(place => ({ category: options.categories[0], categories: options.categories, place }))];
+}
+const categoryQuery = (keys) => keys.length === 1 ? CATEGORIES[keys[0]].query : `(${keys.map(key => CATEGORIES[key].query).join(' OR ')})`;
 export const JOB_STATES = ['new', 'saved', 'hidden'];
 export const normal = (text) => String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
@@ -19,7 +39,7 @@ const keywordList = (value) => value.split(/[,;]|\s+OR\s+/i).map((word) => word.
 
 export function searchDefaults(profile = {}) {
   // Intentionally never include contact details, education scores, or eligibility.
-  return { keywords: 'intern, stagiaire, internship, stage', categories: Object.keys(CATEGORIES), scope: 'montreal_remote', term: clean(profile.availability?.termEn || profile.availability?.term, 80), maxPages: 8 };
+  return { keywords: 'intern, stagiaire, internship, stage', categories: Object.keys(CATEGORIES), scope: 'montreal_plus', term: clean(profile.availability?.termEn || profile.availability?.term, 80), maxPages: 8 };
 }
 export function validateSettings(input, base = searchDefaults()) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail('Paramètres de recherche invalides.');
@@ -40,15 +60,14 @@ function termQuery(term) {
   return `(${seasons[match[1]].map(season => quoted(`${season} ${match[2]}`)).join(' OR ')})`;
 }
 export function buildSearchPlan(settings) {
-  const options = validateSettings(settings), plan = [];
+  const options = validateSettings(settings);
   // Local/remote pairs: a smaller budget doesn't silently remove all remote queries.
-  for (const category of options.categories) for (const location of SCOPES[options.scope].google) {
-    const query = [keywordQuery(options.keywords), CATEGORIES[category].query, location, termQuery(options.term), '(site:myworkdayjobs.com OR site:jobs.lever.co OR site:job-boards.greenhouse.io OR inurl:viewjob OR inurl:job-listing OR inurl:job)', '-site:linkedin.com/in/ -site:linkedin.com/pub/'].filter(Boolean).join(' ');
+  return placePlan(options).map(({ category, categories, place }) => {
+    const query = [keywordQuery(options.keywords), categoryQuery(categories), place.google, termQuery(options.term), '(site:myworkdayjobs.com OR site:jobs.lever.co OR site:job-boards.greenhouse.io OR inurl:viewjob OR inurl:job-listing OR inurl:job)', '-site:linkedin.com/in/ -site:linkedin.com/pub/'].filter(Boolean).join(' ');
     const url = new URL('https://www.google.com/search');
     url.search = new URLSearchParams({ q: query, hl: 'en', gl: 'ca', num: '10' }).toString();
-    plan.push({ category, query, url: url.href });
-  }
-  return plan.slice(0, options.maxPages);
+    return { category, query, url: url.href };
+  });
 }
 export function linkedinSearchUrl(settings, remote = false) {
   const options = validateSettings(settings);
@@ -59,17 +78,13 @@ export function linkedinSearchUrl(settings, remote = false) {
 }
 // Public, undocumented LinkedIn HTML endpoint. Never accepts a caller-supplied host.
 export function buildLinkedInPlan(settings) {
-  const options = validateSettings(settings), plan = [];
-  const places = options.scope === 'montreal_remote'
-    ? [{ location: 'Montreal, Quebec, Canada' }, { location: 'Canada', remote: true }]
-    : [{ location: SCOPES[options.scope].linkedin }];
-  for (const category of options.categories) for (const place of places) {
-    const query = [keywordQuery(options.keywords), CATEGORIES[category].query, termQuery(options.term)].filter(Boolean).join(' ');
+  const options = validateSettings(settings);
+  return placePlan(options).map(({ category, categories, place }) => {
+    const query = [keywordQuery(options.keywords), categoryQuery(categories), termQuery(options.term)].filter(Boolean).join(' ');
     const url = new URL('https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search');
-    url.search = new URLSearchParams({ keywords: query, location: place.location, f_E: '1', start: '0', ...(place.remote ? { f_WT: '2' } : {}) }).toString();
-    plan.push({ category, query, location: place.location, remote: !!place.remote, url: url.href });
-  }
-  return plan.slice(0, options.maxPages);
+    url.search = new URLSearchParams({ keywords: query, location: place.linkedin, f_E: '1', start: '0', ...(place.remote ? { f_WT: '2' } : {}) }).toString();
+    return { category, query, location: place.linkedin, remote: !!place.remote, url: url.href };
+  });
 }
 export function isGoogleSearch(url) {
   try { const u = new URL(url); return u.protocol === 'https:' && !u.username && !u.password && !u.port && /^(?:www\.)?google\.(?:com|ca|fr|co\.uk)$/.test(u.hostname) && u.pathname === '/search'; } catch { return false; }
@@ -129,7 +144,9 @@ export function rankOffer(job, settings) {
   let score = 0;
   if (/\b(intern(?:ship)?|stagiaire|stage|co-?op)\b/.test(text)) { score += 45; reasons.push('stage'); }
   if (categories.length) { score += 30; reasons.push(...categories); }
+  // Priority: Montréal > rest of Canada (Toronto included) > elsewhere (United States).
   if (/\b(montreal|laval|longueuil|brossard|saint-laurent)\b/.test(text)) { score += 10; reasons.push('montreal'); }
+  else if (/\b(canada|quebec|toronto|mississauga|markham|ontario|ottawa|vancouver)\b/.test(text)) { score += 5; reasons.push('canada'); }
   if (/\b(remote|teletravail|hybrid[e]?)\b/.test(text)) { score += 5; reasons.push('flexible'); }
   const year = settings.term?.match(/20\d\d/)?.[0];
   if (year && text.includes(year)) { score += 10; reasons.push('term'); }

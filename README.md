@@ -95,7 +95,7 @@ Leave **Overwrite existing fields** unchecked. **Do not press F5 on a form with 
 
 ### Find internships
 
-Open **Search**, review the internship keywords, AI/software/data/consulting domains, area and term, then choose **Search Google**. Default geography is **Greater Montréal + remote Canada**; the term comes from your availability and remains editable. Preview the exact queries before running them.
+Open **Search**, review the internship keywords, AI/software/data/consulting domains, area and term, then choose **Search Google**. Default geography is **Montréal + remote Canada first, then Toronto and the United States** (Toronto/US only use spare query budget and rank lower; Greater Montréal only, Quebec, Canada, Greater Toronto and United States are also available); the term comes from your availability and remains editable. Preview the exact queries before running them.
 
 - One dedicated, inactive tab per run; **1–8 queries**, at most **30 links per page**, no automatic result visits or pagination.
 - **Stop search** works from every panel tab. Keep the panel open while searching; closing it also stops the run. Completed catalog batches remain saved, and the search tab is left open for inspection.

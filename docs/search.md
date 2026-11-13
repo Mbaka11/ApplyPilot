@@ -145,7 +145,9 @@ creates an application or submits a form.
 | DELETE | `/search/jobs/:id` | Delete a discovery only |
 
 Settings: `{keywords,categories,scope,term,maxPages}`. Categories are `ai`, `dev`,
-`data`, `consulting`; scopes are `montreal_remote`, `quebec`, `canada`. The public
+`data`, `consulting`; scopes are `montreal_plus` (default: Montréal + remote Canada first, then one
+all-domain query each for Toronto and the United States when the budget allows),
+`montreal_remote`, `quebec`, `canada`, `toronto`, `usa`. The public
 request index must be inside the generated plan. Disconnecting its HTTP request
 aborts the upstream operation; already accepted local batches are not rolled back.
 
