@@ -16,7 +16,7 @@ import {
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
 import { cvFileActions } from './cv-files.js';
 import { TailorError, findLatex, sha256, tailorCv } from './cv-tailor.js';
-import { askJson, cancelAllPi, resolvePi, generationSettings } from './llm.js';
+import { askJson, cancelAll, resolvePi, generationSettings, llmHealth } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
 import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery, clearDiscoveries } from './search.js';
@@ -243,7 +243,7 @@ function sanitizeFields(fields) {
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
-route('GET', '/health', () => {
+route('GET', '/health', async () => {
   const cfg = getConfig();
   let profile = null;
   let profileError = null;
@@ -268,6 +268,7 @@ route('GET', '/health', () => {
     cvError: cvError || null,
     pi: resolvePi(cfg).desc,
     generation: generationSettings(cfg),
+    llm: await llmHealth(cfg),
     chrome: findChrome(cfg),
     fill: cfg.fill,
     documents: { transcript: !!(profile && transcriptPath(profile)) },
@@ -423,7 +424,7 @@ route('POST', '/applications/:id/letter', async ({ params, body, res }) => {
     instructions: String(body.instructions || '').slice(0, 2000),
     cfg,
   });
-  const { data, ms, runner, generation } = await askJson(prompt, { cfg, thinking: cfg.llm.letterThinking, signal: controller.signal });
+  const { data, ms, runner, generation } = await askJson(prompt, { cfg, task: 'letter', signal: controller.signal });
   checkpoint();
   if (!data || typeof data.body !== 'string' || data.body.trim().length < 200) {
     throw new HttpError(502, 'pi a renvoyé une lettre vide ou incomplète, réessaie');
@@ -638,7 +639,7 @@ route('POST', '/answers', async ({ body, res }) => {
   if (res.destroyed) controller.abort();
   let reply;
   try {
-    reply = await askJson(prompt, { cfg, thinking: cfg.llm.answersThinking, signal: controller.signal });
+    reply = await askJson(prompt, { cfg, task: 'answers', signal: controller.signal });
   } finally {
     res.off('close', disconnect);
   }
@@ -767,7 +768,7 @@ server.listen(cfg.server.port, cfg.server.host, () => {
 });
 
 async function shutdown() {
-  cancelAllPi();
+  cancelAll();
   await closeBrowser();
   process.exit(0);
 }

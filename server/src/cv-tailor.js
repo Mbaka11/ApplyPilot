@@ -267,7 +267,7 @@ export async function tailorCv({ job, cv, profile, cfg, instructions = '', ask, 
   const bank = buildFactBank({ tex: source, profile, job });
   const language = cv.language === 'fr' || cv.language === 'en' ? cv.language : detectLanguage(parsed.about.text, 'fr');
   const prompt = buildTailorPrompt({ job, cv, parsed, bank, language, instructions });
-  const { data, ms, generation } = await ask(prompt, { cfg, thinking: cfg.llm.letterThinking, signal });
+  const { data, ms, generation } = await ask(prompt, { cfg, task: 'tailor', signal });
   if (signal?.aborted) throw new TailorError(499, 'Adaptation du CV arrêtée.');
   const verdict = validateProposal({ parsed, proposal: data, bank });
   if (!verdict.ok) throw new TailorError(422, `Adaptation refusée : ${verdict.errors.slice(0, 4).join(' ; ')}. Le CV d’origine est intact.`, verdict.errors);

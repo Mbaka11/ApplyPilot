@@ -32,11 +32,26 @@ cvs:
 styleDir: data/style
 
 llm:
-  command: pi # Standard installation, or the full path to a launcher.
-  model: "" # Blank = pi's saved default when readable, otherwise pi selects. Final model is recorded separately.
-  letterThinking: medium # Requested: off | minimal | low | medium | high | xhigh | max. Effective level is not reported.
-  answersThinking: low
+  # claude | pi. Blank = claude when the Claude Code CLI is found, otherwise pi.
+  provider: claude
   timeoutSeconds: 300 # The panel separately limits pending autofill answers to 90 seconds.
+  # Claude Code CLI in headless mode (no tools, no session, no CLAUDE.md/skills/hooks/MCP).
+  # Uses your existing Claude login (subscription): run `claude` once and sign in.
+  # Warning: if ANTHROPIC_API_KEY is set in your environment, the CLI bills the API instead.
+  claude:
+    command: "" # Blank = claude.exe, then claude.cmd, from PATH. Or the full path to claude.exe.
+    model: claude-sonnet-5-5
+    effort: # Requested: low | medium | high | xhigh | max. The effective level is not reported.
+      letter: medium
+      answers: medium
+      tailor: medium
+  # pi (optional alternative). The former flat keys llm.command / model / letterThinking /
+  # answersThinking are still read as pi settings when pi.* is absent.
+  pi:
+    command: pi # Standard installation, or the full path to a launcher.
+    model: "" # Blank = pi's saved default when readable, otherwise pi selects. Final model is recorded separately.
+    letterThinking: medium # Requested: off | minimal | low | medium | high | xhigh | max. Effective level is not reported.
+    answersThinking: low
 
 chrome:
   executablePath: "" # Blank = auto-detect Chrome, then Edge.

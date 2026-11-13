@@ -24,11 +24,9 @@ export const DEFAULTS = {
   cvDir: '',
   cvs: [],
   styleDir: 'data/style',
+  // Réglages détaillés (claude / pi) : voir normalizeLlm().
   llm: {
-    command: 'pi',
-    model: '',
-    letterThinking: 'medium',
-    answersThinking: 'low',
+    provider: '', // vide = claude si le binaire est trouvé, sinon pi
     timeoutSeconds: 300,
   },
   chrome: { executablePath: '' },
@@ -50,6 +48,31 @@ export const DEFAULTS = {
     cvFileName: '{first}_{last}_CV.pdf',
   },
 };
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const text = (v, d) => (typeof v === 'string' ? v.trim() : v == null ? d : String(v).trim());
+
+/** Normalise llm.* : nouvelle forme (provider/claude/pi) ou anciennes clés plates (lues comme réglages pi). Idempotent. */
+export function normalizeLlm(llm = {}) {
+  const claude = llm.claude || {}, pi = llm.pi || {}, effort = claude.effort || {};
+  const level = (v) => (EFFORTS.includes(v) ? v : 'medium');
+  const provider = text(llm.provider, '').toLowerCase();
+  return {
+    provider: ['claude', 'pi'].includes(provider) ? provider : '',
+    timeoutSeconds: Number(llm.timeoutSeconds) || 300,
+    claude: {
+      command: text(claude.command, ''),
+      model: text(claude.model, '') || 'claude-sonnet-5-5',
+      effort: { letter: level(effort.letter), answers: level(effort.answers), tailor: level(effort.tailor) },
+    },
+    pi: {
+      command: text(pi.command ?? llm.command, 'pi') || 'pi',
+      model: text(pi.model ?? llm.model, ''),
+      letterThinking: text(pi.letterThinking ?? llm.letterThinking, 'medium'),
+      answersThinking: text(pi.answersThinking ?? llm.answersThinking, 'low'),
+    },
+  };
+}
 
 const cache = new Map();
 
@@ -98,6 +121,7 @@ export function getConfig() {
   const cfg = deepMerge(DEFAULTS, user);
   if (process.env.APPLYPILOT_PORT) cfg.server.port = Number(process.env.APPLYPILOT_PORT);
   if (process.env.APPLYPILOT_CV_DIR) cfg.cvDir = process.env.APPLYPILOT_CV_DIR;
+  cfg.llm = normalizeLlm(cfg.llm);
   cfg.cvDir = expandPath(cfg.cvDir);
   cfg.styleDir = expandPath(cfg.styleDir || 'data/style');
   return cfg;
