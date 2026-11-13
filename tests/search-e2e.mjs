@@ -2,6 +2,7 @@
 // held at about:blank, then intercepted BEFORE its first network navigation.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fitScreenshot } from './panel-steps.mjs';
 
 export async function testSearch({ browser, panel, site, sw, apiBase, out, check }) {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -113,10 +114,10 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   await panel.click(`[data-search-id="${untrusted.id}"][data-search-action="delete"]`);
   await panel.waitForFunction(() => document.querySelectorAll('[data-discovery-id]').length === 4);
   await panel.setViewport({ width: 320, height: 1000 });
-  check('discovery controls and long URLs fit a 320px side panel', await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  check('discovery controls and long URLs fit a 320px side panel', await panel.evaluate(() => [document.documentElement, document.querySelector('main')].every(element => element.scrollWidth <= element.clientWidth)));
   await panel.setViewport({ width: 420, height: 1000 });
   await panel.evaluate(() => { document.querySelector('#toast').className = 'toast'; window.scrollTo(0, 0); });
-  await panel.screenshot({ path: path.join(out, 'search-en.png'), fullPage: true });
+  await fitScreenshot(panel, path.join(out, 'search-en.png'));
   await panel.click('[data-search-action="linkedin"]');
   await new Promise(resolve => setTimeout(resolve, 200));
   const linkedTab = owned.at(-1);
@@ -153,8 +154,8 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   await panel.waitForFunction(() => document.querySelector('#searchProgress')?.textContent.includes('Search 1/2'), { timeout: 10000 });
   await panel.click('[data-tab="profile"]');
   await panel.waitForSelector('[data-profile-path="identity.address.city"]');
-  await panel.click('#headerSearchStop');
-  check('Stop search is accessible from Profile and immediately restores the UI', await panel.$eval('#headerSearchStop', el => el.classList.contains('hidden')));
+  await panel.click('#actionBar [data-action="stopSearch"]');
+  check('Stop search is accessible from Profile and immediately restores the UI', !(await panel.$('#actionBar [data-action="stopSearch"]')));
   const stoppedNavigations = navigations.length;
   await sleep(700);
   check('Stop prevents the next query and preserves completed catalog entries', navigations.length === stoppedNavigations && (await request('/search')).jobs.length === 4);
@@ -167,7 +168,7 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   const beforeChallenge = navigations.length;
   await panel.click('[data-search-action="start"]');
   await panel.waitForFunction(() => document.querySelector('#searchProgress')?.textContent.includes('requires verification'), { timeout: 10000 });
-  check('Google verification halts visibly without retry or bypass', navigations.length === beforeChallenge + 1 && (await panel.$eval('#headerSearchStop', el => el.classList.contains('hidden'))));
+  check('Google verification halts visibly without retry or bypass', navigations.length === beforeChallenge + 1 && (!(await panel.$('#actionBar [data-action="stopSearch"]'))));
   check('all discovery paths preserve the real application state and form sentinel', JSON.stringify((await request('/applications')).applications) === appsBefore && await site.evaluate(() => globalThis.discoveryUnsaved === 'untouched-form'));
   // The server-side public connector is replaced by a local fetch fixture, not the network.
   const fixtureMode = path.join(out, 'data', 'linkedin-fixture-mode.json');
@@ -188,16 +189,15 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   await panel.$eval('#searchSettingsDetails', e => { e.open = false; });
   await panel.$eval('#searchManualDetails', e => { e.open = false; });
   await panel.evaluate(() => { window.scrollTo(0, 0); document.querySelector('#toast').className = 'toast'; });
-  const searchHeight = await panel.$eval('#tab-search', el => Math.ceil(el.getBoundingClientRect().bottom + window.scrollY + 20));
-  await panel.screenshot({ path: path.join(out, 'search-prototype-en.png'), clip: { x: 0, y: 0, width: 420, height: searchHeight }, captureBeyondViewport: true });
+  await fitScreenshot(panel, path.join(out, 'search-prototype-en.png'));
   await panel.setViewport({ width: 320, height: 1000 });
-  check('prototype badges, five tabs and source filters fit at 320px', await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  check('prototype badges, five tabs and source filters fit at 320px', await panel.evaluate(() => [document.documentElement, document.querySelector('main')].every(element => element.scrollWidth <= element.clientWidth)));
   await panel.setViewport({ width: 420, height: 1000 });
   await sleep(2700);
   fs.writeFileSync(fixtureMode, JSON.stringify({ mode: 'wait' }));
   await panel.click('[data-search-action="startLinkedIn"]');
   for (let i = 0; i < 100 && !requests().some(row => row.mode === 'wait'); i++) await sleep(30);
-  await panel.click('#headerSearchStop');
+  await panel.click('#actionBar [data-action="stopSearch"]');
   for (let i = 0; i < 100 && !requests().some(row => row.type === 'abort'); i++) await sleep(30);
   const stoppedPublic = requests().filter(row => row.type === 'request').length;
   await sleep(2700);
@@ -225,9 +225,9 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   check('clear empties the catalog but preserves settings and applications', afterClear.jobs.length === 0 && JSON.stringify(afterClear.settings) === JSON.stringify(beforeClear.settings) && JSON.stringify((await request('/applications')).applications) === appsBefore);
   check('clear keeps an exact private rollback backup', fs.readdirSync(path.join(out, 'data', 'backups', 'search')).some(name => name.startsWith('discovery-before-clear-')));
   await panel.click('[data-tab="home"]');
-  await panel.waitForSelector('#tab-home .home-metrics');
+  await panel.waitForSelector('#tab-home .metrics');
   await panel.evaluate(() => { window.scrollTo(0, 0); document.querySelector('#toast').className = 'toast'; });
-  await panel.screenshot({ path: path.join(out, 'home-prototype-en.png'), fullPage: true });
+  await fitScreenshot(panel, path.join(out, 'home-prototype-en.png'));
   await panel.click('#tab-home [data-activate]');
   check('resuming the same application from Home preserves the unsaved letter', (await panel.$eval('#letterSubject', e => e.value)) === 'Unsaved letter search draft');
   await panel.evaluate(() => { chrome.tabs.create = globalThis.__originalSearchCreate; chrome.tabs.query = globalThis.__originalSearchQuery; });

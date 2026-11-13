@@ -4,12 +4,14 @@ import { isLinkedIn } from '../../search/core.mjs';
 import { createCvInspector } from '../cv-inspector.mjs';
 import { createCvTailor } from '../cv-tailor.mjs';
 import { S, PLATFORM_LABEL } from '../state.mjs';
-import { $, esc, tr, toast, statusLabel } from '../ui.mjs';
+import { $, esc, tr, toast, statusLabel, infoButton, infoBody, notice } from '../ui.mjs';
 import { api, loadApps } from '../api.mjs';
 import { activeTab, scriptable, runInTab } from '../tabs.mjs';
 import { renderHome } from './home.mjs';
 import { renderLetter } from './letter.mjs';
-import { renderFill, stopFill } from './fill.mjs';
+import { renderFill, renderSubmit, stopFill } from './fill.mjs';
+import { renderStepper } from './stepper.mjs';
+import { newContext } from './actionbar.mjs';
 import { switchTab } from './shell.mjs';
 
 export const otherCvBusy = () => !S.health || S.cvBusy || S.appBusy || S.switching || S.fillBusy || S.letterBusy;
@@ -55,6 +57,9 @@ export async function refreshPage() {
       step: frames.find((f) => f.step)?.step || null,
     };
     S.pageError = '';
+    // A different offer in the tab brings the automatic suggestion back; a manual choice only lasts for the same context.
+    const contextKey = `${S.page.jobKey || ''}|${S.page.isPosting ? 'posting' : S.page.fieldCount > 0 ? 'form' : 'other'}`;
+    if (contextKey !== S.pageContext) { S.pageContext = contextKey; S.step = null; }
     if (S.fillRun && (tab.id !== S.fillRun.tabId || S.fillRun.pages?.some((old) => {
       const current = frames.find((f) => f.frameId === old.frameId);
       return !current || current.pageIdentity !== old.pageIdentity;
@@ -66,6 +71,8 @@ export async function refreshPage() {
   }
   renderPage();
   renderAppCard();
+  renderLetter();
+  renderFill();
   renderHome();
 }
 
@@ -86,6 +93,7 @@ export async function activateApplication(id) {
 }
 export async function setActiveApp(id, { quiet = false } = {}) {
   if (S.fillRun) stopFill();
+  S.step = null; // la suggestion automatique reprend pour chaque candidature
   if (!id) {
     S.app = null;
     S.draft = null;
@@ -152,35 +160,45 @@ export async function selectCv(id) {
   } finally { S.cvBusy = false; renderAppCard(); }
 }
 
+function renderAdvanced() {
+  const el = $('#advancedTools');
+  if (!el) return;
+  const open = el.open;
+  el.innerHTML = `<summary>⋯ ${tr('Outils avancés')}</summary>
+    <div class="more-body stack">
+      <div class="small"><b>${tr('Diagnostic local du formulaire')}</b> ${infoButton('info-diagnostic')}</div>
+      <div class="small muted">${tr('Exporte la structure du formulaire dans un fichier local, sans réponse ni donnée de connexion.')}</div>
+      ${infoBody('info-diagnostic', `<p>${tr('Exporte uniquement la structure, les catégories de libellés et les liens ARIA. Aucune réponse, pièce jointe, URL complète ou donnée de connexion. Aucun clic dans le formulaire, appel IA ou envoi au serveur.')}</p>
+        <p>${tr('Le fichier reste dans tes téléchargements. Les libellés libres et les identifiants sont remplacés par des catégories et références anonymes. Vérifie le rapport avant de le partager.')}</p>`)}
+      <button type="button" class="btn" data-action="diagnostic" ${S.fillBusy || S.diagnosticBusy ? 'disabled' : ''}>${tr(S.diagnosticBusy ? 'Lecture de la structure…' : 'Exporter le diagnostic local')}</button>
+    </div>`;
+  el.open = open;
+}
+
 export function renderPage() {
   const el = $('#pageCard');
+  renderAdvanced();
   if (!S.page) {
-    el.innerHTML = `<div class="muted small">${esc(tr(S.pageError || 'Analyse de la page…'))}</div>`;
+    el.innerHTML = `<div class="empty small">${esc(tr(S.pageError || 'Analyse de la page…'))}</div>`;
+    renderStepper();
     return;
   }
   const p = S.page;
   const known = S.apps.find((a) => a.jobKey && a.jobKey === p.jobKey);
   const step = p.step?.name ? ` · ${tr('étape')} ${p.step.index ? `${p.step.index}/${p.step.total} ` : ''}${esc(p.step.name)}` : '';
-  let action = '';
+  let detail = '';
   if (known && known.id !== S.app?.id) {
-    action = `<h3>${esc(known.company)} · ${esc(known.title)}</h3><button class="btn primary" data-activate="${esc(known.id)}">${tr('Reprendre cette candidature')}</button>`;
+    detail = `<h3>${esc(known.company)} · ${esc(known.title)}</h3><div class="small muted">${tr('Tu as déjà une candidature pour cette offre.')}</div>`;
   } else if (p.isPosting && !known) {
-    action = `<div class="stack"><div><span class="badge">${tr('Offre détectée')}</span></div>
-      <h3>${esc(p.title || tr('Offre sans titre'))}</h3><div class="muted">${esc(p.company || '')}</div>
-      <button class="btn primary big" data-action="analyze">${tr('Analyser cette offre')}</button></div>`;
+    detail = `<span class="badge">${tr('Offre détectée')}</span><h3>${esc(p.title || tr('Offre sans titre'))}</h3><div class="muted">${esc(p.company || '')}</div>`;
   } else if (p.fieldCount > 0 || p.fileCount > 0 || p.manualActionCount > 0) {
-    action = `<div class="small muted">${tr('Formulaire : {count} champ(s)', { count: p.fieldCount })}${p.fileCount ? tr(' + {count} fichier(s)', { count: p.fileCount }) : ''}${p.manualActionCount ? tr(' + {count} action(s) manuelle(s)', { count: p.manualActionCount }) : ''}${step}</div>`;
+    detail = `<div class="small muted">${tr('Formulaire : {count} champ(s)', { count: p.fieldCount })}${p.fileCount ? tr(' + {count} fichier(s)', { count: p.fileCount }) : ''}${p.manualActionCount ? tr(' + {count} action(s) manuelle(s)', { count: p.manualActionCount }) : ''}${step}</div>`;
   } else if (!p.isPosting) {
-    action = `<div class="small muted">${tr('Aucune offre ni formulaire détecté ici.')}
-      <button class="btn ghost" data-action="analyze">${tr('Analyser quand même')}</button></div>`;
+    detail = `<div class="small muted">${tr('Aucune offre ni formulaire détecté ici.')}</div>`;
   }
-  el.innerHTML = `<h2><span>Page</span><span class="badge grey">${esc(tr(PLATFORM_LABEL[p.platform] || p.platform))}</span></h2>${action}
-    ${p.hasPassword ? `<div class="small muted">${tr('🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.')}</div>` : ''}
-    <details class="small" style="margin-top:8px"><summary>${tr('Diagnostic local du formulaire')}</summary>
-      <p class="muted">${tr('Exporte uniquement la structure, les catégories de libellés et les liens ARIA. Aucune réponse, pièce jointe, URL complète ou donnée de connexion. Aucun clic dans le formulaire, appel IA ou envoi au serveur.')}</p>
-      <p class="muted">${tr('Le fichier reste dans tes téléchargements. Les libellés libres et les identifiants sont remplacés par des catégories et références anonymes. Vérifie le rapport avant de le partager.')}</p>
-      <button type="button" class="btn" data-action="diagnostic" ${S.fillBusy || S.diagnosticBusy ? 'disabled' : ''}>${tr(S.diagnosticBusy ? 'Lecture de la structure…' : 'Exporter le diagnostic local')}</button>
-    </details>`;
+  el.innerHTML = `<div class="page-row"><span class="small muted">${tr('Page')}</span><span class="badge grey">${esc(tr(PLATFORM_LABEL[p.platform] || p.platform))}</span></div>${detail}
+    ${p.hasPassword ? notice('login', 'Seul ton courriel est rempli : mot de passe, CAPTCHA et double authentification restent manuels.', '🔒 « Remplir cette page » renseigne seulement ton courriel. Utilise Chrome pour le mot de passe ; connexion, CAPTCHA et double authentification restent manuels.') : ''}`;
+  renderStepper();
 }
 
 /** Exigences repérées dans l'offre (pièces, conditions), comparées au profil. */
@@ -195,15 +213,30 @@ function requirementsHtml(reqs) {
   return `<details class="reqs" ${todo ? 'open' : ''}><summary>${tr('À prévoir pour cette offre')}${todo ? ` <span class="badge warn">${todo}</span>` : ''}</summary><ul class="req-list">${items}</ul></details>`;
 }
 
-export function renderAppCard() {
+function renderOfferCard() {
   const el = $('#appCard');
   if (!S.app) {
-    cvInspector.reset(); cvTailor.reset();
     const recent = S.apps.filter((a) => a.status === 'en cours').slice(0, 8);
-    el.innerHTML = `<h2>${tr('Candidature active')}</h2>
-      <div class="muted small">${tr('Aucune. Ouvre l’offre et clique « Analyser cette offre » : la candidature reste active pendant que tu remplis le formulaire.')}</div>
-      ${recent.length ? `<label class="field" style="margin-top:8px">${tr('Reprendre une candidature en cours')}</label>
-        <select id="pickApp"><option value="">—</option>${recent.map((a) => `<option value="${esc(a.id)}">${esc(a.company || '?')} — ${esc(a.title || '')}</option>`).join('')}</select>` : ''}`;
+    el.innerHTML = recent.length ? `<div class="block"><label class="field" for="pickApp">${tr('Reprendre une candidature en cours')}</label>
+        <select id="pickApp"><option value="">—</option>${recent.map((a) => `<option value="${esc(a.id)}">${esc(a.company || '?')} — ${esc(a.title || '')}</option>`).join('')}</select></div>` : '';
+    return;
+  }
+  const a = S.app;
+  el.innerHTML = `<div class="block">${newContext() ? `<div class="small muted">${tr('Candidature ouverte')}</div>` : ''}<div class="row"><h3 class="grow">${esc(a.job?.title || tr('Poste'))}</h3><span class="badge ${a.status === 'soumise' ? 'ok' : ''}">${esc(statusLabel(a.status))}</span></div>
+    <div class="muted">${esc(a.job?.company || '')}${a.job?.location ? ` · ${esc(a.job.location)}` : ''}</div>
+    ${requirementsHtml(S.requirements)}
+    <div class="row block-actions">
+      ${a.job?.url ? `<button type="button" class="btn ghost" data-action="openJob">${tr('Voir l’offre')}</button>` : ''}
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" data-action="newApp" title="${tr('Désactiver (l’historique reste dans le Journal)')}">${tr('Quitter cette candidature')}</button>
+    </div></div>`;
+}
+
+function renderCvCard() {
+  const el = $('#cvCard');
+  if (!S.app) {
+    cvInspector.reset(); cvTailor.reset();
+    el.innerHTML = `<div class="empty small">${tr('Analyse d’abord une offre : le CV et la lettre se préparent ici.')}</div>`;
     return;
   }
   const a = S.app;
@@ -212,24 +245,19 @@ export function renderAppCard() {
   const cvOptions = S.cvs
     .map((c) => `<option value="${esc(c.id)}" ${c.id === a.cvId ? 'selected' : ''}>${esc(c.name)}${c.language ? ` (${c.language.toUpperCase()})` : ''}${rec?.cvId === c.id ? ' ★' : ''}</option>`)
     .join('');
-  el.innerHTML = `<h2><span>${tr('Candidature active')}</span><span class="badge ${a.status === 'soumise' ? 'ok' : ''}">${esc(statusLabel(a.status))}</span></h2>
-    <h3>${esc(a.job?.title || tr('Poste'))}</h3>
-    ${requirementsHtml(S.requirements)}
-    <div class="muted">${esc(a.job?.company || '')}${a.job?.location ? ` · ${esc(a.job.location)}` : ''}</div>
-    <div class="stack" style="margin-top:10px">
-      <div><label class="field" for="cvSelect">${tr('CV à joindre')} ${rec?.cvId ? `<span class="muted">${esc(tr('(★ recommandé : {reason})', { reason: tr(rec.reason || '') }))}</span>` : ''}</label>
-        <select id="cvSelect" ${cvSelectionLocked() ? 'disabled' : ''}>${!selectedCv && S.cvs.length ? `<option value="" selected disabled>${tr(a.cvId ? 'CV sélectionné introuvable' : 'Choisis un CV')}</option>` : ''}${cvOptions || `<option value="">${tr('Aucun CV trouvé')}</option>`}</select>
-        <div id="cvInspector"></div>
-        <div id="cvTailor" style="margin-top:10px"></div></div>
-      ${a.job?.url && a.status !== 'soumise' ? `<button class="btn primary big" data-action="applyJob">${tr('Postuler / connexion')}</button><div class="small muted">${tr('Ouvre dans ce navigateur : une session Workday valide est réutilisée. Compte propre à chaque entreprise ; mots de passe gérés par Chrome.')}</div>` : ''}
-      <div class="row">
-        ${a.job?.url ? `<button class="btn ghost" data-action="openJob">${tr('Voir l’offre')}</button>` : ''}
-        <span class="grow"></span>
-        <button class="btn ghost" data-action="newApp" title="${tr('Désactiver (l’historique reste dans le Journal)')}">${tr('Quitter cette candidature')}</button>
-      </div>
-    </div>`;
+  el.innerHTML = `<div class="block"><label class="field" for="cvSelect">${tr('CV à joindre')}</label>
+    <select id="cvSelect" ${cvSelectionLocked() ? 'disabled' : ''}>${!selectedCv && S.cvs.length ? `<option value="" selected disabled>${tr(a.cvId ? 'CV sélectionné introuvable' : 'Choisis un CV')}</option>` : ''}${cvOptions || `<option value="">${tr('Aucun CV trouvé')}</option>`}</select>
+    ${rec?.cvId ? `<div class="small muted">${esc(tr('(★ recommandé : {reason})', { reason: tr(rec.reason || '') }))}</div>` : ''}
+    <div id="cvInspector"></div>
+    <div id="cvTailor"></div></div>`;
   cvInspector.mount({ element: $('#cvInspector'), server: S.server, applicationId: a.id, cvId: a.cvId || '', cv: selectedCv, available: !!selectedCv, disabled: cvSelectionLocked() });
   cvTailor.mount({ element: $('#cvTailor'), server: S.server, applicationId: a.id, cvId: a.cvId || '', cv: selectedCv, application: a, health: S.health, available: !!selectedCv && !!a.job?.title, disabled: otherCvBusy() || !!S.fillRun });
+}
+
+export function renderAppCard() {
+  renderOfferCard();
+  renderCvCard();
+  renderStepper();
 }
 
 export function renderApp() {
@@ -238,6 +266,7 @@ export function renderApp() {
   renderAppCard();
   renderLetter();
   renderFill();
+  renderSubmit();
 }
 
 export function openJob() {

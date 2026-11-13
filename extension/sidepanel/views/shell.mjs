@@ -1,4 +1,4 @@
-// Coque du panneau : en-tête, état du serveur, langue et navigation par onglets.
+// Coque du panneau : en-tête compact, état du serveur et navigation par onglets.
 import { S, VERSION } from '../state.mjs';
 import { $, tr } from '../ui.mjs';
 import { checkServer, loadApps } from '../api.mjs';
@@ -6,18 +6,24 @@ import { renderHome } from './home.mjs';
 import { renderApp, syncCvControls } from './application.mjs';
 import { renderJournal } from './tracker.mjs';
 import { renderProfile } from './profile.mjs';
+import { renderSettings } from './settings.mjs';
+import { renderActionBar } from './actionbar.mjs';
 import { searchPanel } from './search.mjs';
 
 export function renderShell() {
   document.documentElement.lang = S.uiLanguage;
   $('#appVersion').textContent = `v${VERSION}`;
   $('#appVersion').title = `${tr('Version de l’extension')} ${VERSION}`;
-  $('#uiLanguage').value = S.uiLanguage;
-  $('#uiLanguageLabel').textContent = tr('Langue de l’interface');
-  $('#serverStatus').title = `${tr('Revérifier la connexion au serveur')} · ${tr('Serveur')} v${S.health?.version || '—'}`;
-  for (const [tab, label] of [['home', 'Accueil'], ['app', 'Candidature'], ['search', 'Recherche'], ['journal', 'Journal'], ['profile', 'Profil']]) {
-    $(`[data-tab="${tab}"]`).textContent = tr(label);
+  for (const [tab, label] of [['home', 'Accueil'], ['app', 'Candidature'], ['search', 'Recherche'], ['journal', 'Suivi']]) {
+    $(`.tabs [data-tab="${tab}"]`).textContent = tr(label);
   }
+  for (const [id, label] of [['profileButton', 'Profil'], ['settingsButton', 'Réglages']]) {
+    $(`#${id}`).setAttribute('aria-label', tr(label));
+    $(`#${id}`).title = tr(label);
+  }
+  $('nav.tabs').setAttribute('aria-label', tr('Sections'));
+  $('#actionBar').setAttribute('aria-label', tr('Action principale'));
+  renderSettings();
 }
 
 export async function setUiLanguage(language) {
@@ -43,27 +49,40 @@ export function renderStatus() {
   syncCvControls();
   const el = $('#serverStatus');
   const off = $('#offline');
+  let text;
   if (S.health) {
     const mismatch = S.health.version && S.health.version !== VERSION;
-    el.className = `status on${mismatch ? ' mismatch' : ''}`;
-    el.textContent = mismatch ? tr('Serveur v{version} : à redémarrer', { version: S.health.version }) : tr('Serveur connecté · {count} CV', { count: S.health.cvCount });
+    const llmDown = S.health.llm && !S.health.llm.available;
+    el.className = `status on${mismatch || llmDown ? ' mismatch' : ''}`;
+    text = mismatch ? tr('Serveur v{version} : à redémarrer', { version: S.health.version }) : tr('Serveur connecté · {count} CV', { count: S.health.cvCount });
+    el.title = [tr('Revérifier la connexion au serveur'), text, llmDown ? tr('IA introuvable : voir Réglages') : '', `${tr('Serveur')} v${S.health.version || '—'}`].filter(Boolean).join(' · ');
     off.classList.add('hidden');
   } else {
     el.className = 'status off';
-    el.textContent = tr('Serveur arrêté');
+    text = tr('Serveur arrêté');
+    el.title = `${tr('Revérifier la connexion au serveur')} · ${text}`;
     off.classList.remove('hidden');
     off.innerHTML = `<b>${tr('Le serveur local ne répond pas.')}</b><div class="small">${tr('Double-clique sur')} <span class="kbd">start.cmd</span> ${tr('dans le dossier ApplyPilot, puis')}
-      <button class="btn ghost" data-action="recheck">${tr('réessayer')}</button>.</div>`;
+      <button type="button" class="btn ghost sm" data-action="recheck">${tr('réessayer')}</button>.</div>`;
   }
+  $('#serverStatusText').textContent = text;
+  renderSettings();
+  renderActionBar();
 }
 
 export function switchTab(name) {
   S.tab = name;
-  document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tabs [data-tab], .top-actions [data-tab]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tab === name);
+    if (b.dataset.tab === name) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
   if (name === 'home') { renderHome(); checkServer(); }
   if (name === 'journal') loadApps().then(renderJournal, () => renderJournal());
   if (name === 'profile') checkServer().then(renderProfile);
+  if (name === 'settings') checkServer().then(renderSettings);
   if (name === 'app') renderApp();
   if (name === 'search') searchPanel.show();
+  renderActionBar();
+  if ($('main')) $('main').scrollTop = 0;
 }

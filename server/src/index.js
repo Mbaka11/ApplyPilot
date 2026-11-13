@@ -427,7 +427,7 @@ route('POST', '/applications/:id/letter', async ({ params, body, res }) => {
   const { data, ms, runner, generation } = await askJson(prompt, { cfg, task: 'letter', signal: controller.signal });
   checkpoint();
   if (!data || typeof data.body !== 'string' || data.body.trim().length < 200) {
-    throw new HttpError(502, 'pi a renvoyé une lettre vide ou incomplète, réessaie');
+    throw new HttpError(502, 'L’IA a renvoyé une lettre vide ou incomplète, réessaie');
   }
   const language = ['fr', 'en'].includes(body.language) ? body.language : data.language === 'en' ? 'en' : 'fr';
   const letter = {

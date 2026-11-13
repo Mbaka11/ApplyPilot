@@ -1,8 +1,8 @@
 // ApplyPilot — panneau latéral : initialisation, table ACTIONS et câblage des événements.
 // Le rendu et la logique de chaque onglet vivent dans views/*.mjs.
 import { chooseLanguage } from './i18n.mjs';
-import { S, DEFAULT_SERVER, savePrefs } from './state.mjs';
-import { $, toast, tr } from './ui.mjs';
+import { S, DEFAULT_SERVER, savePrefs, markSeen } from './state.mjs';
+import { $, toast, tr, toggleInfo } from './ui.mjs';
 import { checkServer } from './api.mjs';
 import { activeTab, exec, runInTab } from './tabs.mjs';
 import { renderShell, setUiLanguage, switchTab } from './views/shell.mjs';
@@ -13,6 +13,7 @@ import { changeStatus, deleteApplication } from './views/tracker.mjs';
 import { forgetMemory, reloadProfile, saveProfile, saveServer } from './views/profile.mjs';
 import { searchPanel } from './views/search.mjs';
 import { renderHome } from './views/home.mjs';
+import { toggleStep } from './views/stepper.mjs';
 
 const ACTIONS = {
   recheck: async () => {
@@ -37,6 +38,7 @@ const ACTIONS = {
   prepareDocuments: () => prepareAndAttachDocuments(),
   diagnostic: () => exportFormDiagnostic(),
   stopFill: () => stopFill(),
+  stopSearch: () => searchPanel.stop(),
   memorize: () => captureMemory(),
   submitted: () => markSubmitted(),
   exportCsv: () => chrome.tabs.create({ url: `${S.server}/journal.csv` }),
@@ -46,8 +48,12 @@ const ACTIONS = {
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, li[data-focus]');
   if (!t) return;
+  t.closest('.more-menu')?.removeAttribute('open');
   try {
     if (t.dataset.tab) return switchTab(t.dataset.tab);
+    if (t.dataset.stepToggle) return toggleStep(t.dataset.stepToggle);
+    if (t.dataset.info) return toggleInfo(t);
+    if (t.dataset.seen) { await markSeen(t.dataset.seen); return renderApp(); }
     if (t.dataset.action && ACTIONS[t.dataset.action]) {
       if (t.tagName === 'BUTTON') t.disabled = true;
       try {
@@ -67,6 +73,11 @@ document.addEventListener('click', async (e) => {
     toast(err.message || String(err), 'error');
   }
 });
+
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('li[data-focus]')) { e.preventDefault(); e.target.click(); }
+});
+document.addEventListener('toggle', (e) => { if (e.target.id === 'fillOptions') S.optionsOpen = e.target.open; }, true);
 
 document.addEventListener('submit', (e) => {
   if (e.target.id !== 'profileForm') return;
@@ -152,7 +163,8 @@ setInterval(() => {
 // Démarrage
 // ---------------------------------------------------------------------------
 (async function init() {
-  const stored = await chrome.storage.local.get(['serverUrl', 'prefs', 'uiLanguage']);
+  const stored = await chrome.storage.local.get(['serverUrl', 'prefs', 'uiLanguage', 'seenNotices']);
+  S.seen = stored.seenNotices && typeof stored.seenNotices === 'object' ? stored.seenNotices : {};
   S.uiLanguage = chooseLanguage(stored.uiLanguage, navigator.language);
   renderShell();
   S.server = (stored.serverUrl || DEFAULT_SERVER).replace(/\/+$/, '');

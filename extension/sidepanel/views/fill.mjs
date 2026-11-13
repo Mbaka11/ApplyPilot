@@ -1,12 +1,14 @@
 // Remplissage du formulaire : exécution annulable, documents SuccessFactors, mémoire, diagnostic.
 import { createFormDiagnostic, downloadFormDiagnostic } from '../form-diagnostic.mjs';
 import { S, VERSION } from '../state.mjs';
-import { $, esc, tr, toast } from '../ui.mjs';
+import { $, esc, tr, toast, infoButton, infoBody } from '../ui.mjs';
 import { api, loadApps } from '../api.mjs';
 import { activeTab, scriptable, exec, runInTab } from '../tabs.mjs';
 import { renderPage, renderAppCard, renderApp, patchApp, syncCvControls } from './application.mjs';
 import { renderLetter, saveLetter, signature } from './letter.mjs';
 import { searchPanel } from './search.mjs';
+import { pageHasForm, primaryAction } from './actionbar.mjs';
+import { renderStepper } from './stepper.mjs';
 
 // Explicit local export; no server, provider, answer memory or content-script reinjection.
 export async function exportFormDiagnostic() {
@@ -48,7 +50,7 @@ export function stopFill({ pageChanged = false, timedOut = false } = {}) {
   if (pageChanged) S.fill = null;
   renderFill();
   if (run.documents) renderLetter();
-  toast(timedOut ? 'pi met trop de temps : remplissage arrêté. Réessaie ou désactive l’IA.' : pageChanged
+  toast(timedOut ? 'L’IA met trop de temps : remplissage arrêté. Réessaie ou désactive l’IA.' : pageChanged
     ? 'Étape changée : ancien remplissage arrêté. Tu peux remplir cette page.'
     : run.documents ? 'Préparation arrêtée. Les fichiers déjà transmis restent sur le site.' : 'Remplissage arrêté. Les champs déjà remplis sont conservés.');
 }
@@ -87,7 +89,7 @@ export async function prepareAndAttachDocuments() {
   const tab = await activeTab();
   if (S.fillRun || S.diagnosticBusy || S.app?.id !== appId || S.app?.cvId !== cvId || S.server !== server || S.draftDirty) return;
   if (!tab || !scriptable(tab.url) || S.page?.platform !== 'successfactors') return toast('Documents automatiques disponibles uniquement sur la page principale SuccessFactors.', 'error');
-  if (!confirm(tr('Joindre le CV « {cv} » et la lettre pour « {title} » — {company} à la page {host} ?\nUne lettre absente sera générée avec pi (quota habituel). La lettre existante sera conservée. Rien ne sera soumis. Arrêter ne retire pas les fichiers déjà transmis.', { cv: S.app.cvTailored?.useForForms ? tr('{name} (adapté à l’offre)', { name: selected.name }) : selected.name, title: S.app.job.title, company: S.app.job.company, host: new URL(tab.url).hostname }))) return;
+  if (!confirm(tr('Joindre le CV « {cv} » et la lettre pour « {title} » — {company} à la page {host} ?\nUne lettre absente sera générée avec l’IA (quota habituel). La lettre existante sera conservée. Rien ne sera soumis. Arrêter ne retire pas les fichiers déjà transmis.', { cv: S.app.cvTailored?.useForForms ? tr('{name} (adapté à l’offre)', { name: selected.name }) : selected.name, title: S.app.job.title, company: S.app.job.company, host: new URL(tab.url).hostname }))) return;
   const run = { id: crypto.randomUUID(), controller: new AbortController(), tabId: tab.id, pages: null, documents: true };
   let draftState = JSON.stringify(S.draft);
   const guard = () => {
@@ -202,7 +204,7 @@ export async function fillPage() {
     const info = frames.find((f) => f.info?.addedEntries)?.info || {};
     S.fill = { results, step, info, at: Date.now(), noCv: !files.cv };
     if (S.prefs.useAi && unresolved.length) {
-      S.fillPhase = `pi répond à ${unresolved.length} question${unresolved.length > 1 ? 's' : ''}…`;
+      S.fillPhase = `L’IA répond à ${unresolved.length} question${unresolved.length > 1 ? 's' : ''}…`;
       renderFill();
       try {
         run.answerTimer = setTimeout(() => { if (S.fillRun === run) stopFill({ timedOut: true }); }, 90_000);
@@ -273,20 +275,20 @@ const groupOf = (r) => (r.status === 'fail' || r.status === 'unresolved' ? 'todo
 export function renderFill() {
   syncCvControls();
   if ($('[data-action="diagnostic"]')) $('[data-action="diagnostic"]').disabled = S.fillBusy || S.diagnosticBusy;
-  $('#headerStop').classList.toggle('hidden', !S.fillBusy);
-  $('#headerStop').textContent = tr('Arrêter');
   const el = $('#fillCard');
-  const opts = `<div class="stack small" style="margin-top:8px">
-      <label class="check"><input type="checkbox" id="optAi" ${S.prefs.useAi ? 'checked' : ''}> ${tr('Faire répondre pi aux questions restantes')}</label>
-      <label class="check"><input type="checkbox" id="optEntries" ${S.prefs.addEntries ? 'checked' : ''}> ${tr('Workday : ajouter mes expériences et formations si la section est vide')}</label>
-      <label class="check"><input type="checkbox" id="optOverwrite" ${S.prefs.overwrite ? 'checked' : ''}> ${tr('Remplacer les champs déjà remplis')}</label>
-    </div>`;
   if (S.fillBusy) {
-    el.innerHTML = `<h2>${tr('Remplissage')}</h2><div class="busy" role="status"><span class="spinner"></span>${esc(tr(S.fillPhase))}</div>
-      <button type="button" class="btn danger" style="margin-top:8px" data-action="stopFill">${tr('Arrêter')}</button>
-      <div class="small muted" style="margin-top:6px">${tr('Ne touche pas à la page pendant le remplissage.')}</div>`;
+    // « Arrêter » vit dans la barre d’action ; ici seulement la progression.
+    el.innerHTML = `<div class="block"><div class="busy" role="status"><span class="spinner" aria-hidden="true"></span><span>${esc(tr(S.fillPhase))}</span></div></div>`;
+    renderStepper();
+    renderSubmit();
     return;
   }
+  const options = `<details class="options" id="fillOptions" ${S.optionsOpen ? 'open' : ''}><summary>${tr('Options')}</summary>
+      <div class="stack small">
+        <label class="check"><input type="checkbox" id="optAi" ${S.prefs.useAi ? 'checked' : ''}> ${tr('Faire répondre l’IA aux questions restantes')}</label>
+        <label class="check"><input type="checkbox" id="optEntries" ${S.prefs.addEntries ? 'checked' : ''}> ${tr('Workday : ajouter mes expériences et formations si la section est vide')}</label>
+        <label class="check"><input type="checkbox" id="optOverwrite" ${S.prefs.overwrite ? 'checked' : ''}> ${tr('Remplacer les champs déjà remplis')}</label>
+      </div></details>`;
   let body = '';
   if (S.fill) {
     const groups = {};
@@ -304,30 +306,48 @@ export function renderFill() {
       .filter(([n]) => n)
       .map(([n, label]) => `${n} ${tr(label)}`);
     if (addedText.length) body += `<div class="small muted">${esc(tr('Blocs ajoutés : {entries}.', { entries: addedText.join(', ') }))}</div>`;
-    if (S.fill.noCv) body += `<div class="small" style="color:var(--warn)">${tr('Aucun CV joint : analyse l’offre d’abord pour choisir un CV.')}</div>`;
+    if (S.fill.noCv) body += `<div class="small text-warn">${tr('Aucun CV joint : analyse l’offre d’abord pour choisir un CV.')}</div>`;
     for (const [k, t] of RES_GROUPS) {
       const list = groups[k];
       if (!list?.length) continue;
       const items = list
         .map(
-          (r) => `<li class="${k}" data-focus="${esc(r.id)}"><div><span class="lbl">${esc(r.label === '(sans libellé)' ? tr(r.label) : r.label)}</span>${r.required ? ' <span class="muted">*</span>' : ''}</div>
+          (r) => `<li class="${k}" data-focus="${esc(r.id)}" tabindex="0"><div><span class="lbl">${esc(r.label === '(sans libellé)' ? tr(r.label) : r.label)}</span>${r.required ? ' <span class="muted">*</span>' : ''}</div>
           ${r.value ? `<div class="val">${esc(['checkbox', 'checkboxes'].includes(r.kind) ? tr(r.value) : r.value)}</div>` : ''}${r.note ? `<div class="note">${esc(tr(r.note))}${r.source === 'ia' ? ` · ${tr('IA')}` : ''}</div>` : ''}</li>`,
         )
         .join('');
       const open = k === 'check' || k === 'todo';
       body += `<details ${open ? 'open' : ''}><summary>${tr(t)} (${list.length})</summary><ul class="results">${items}</ul></details>`;
     }
-    body += `<div class="legend"><span class="l-ok">${tr('rempli')}</span><span class="l-check">${tr('à vérifier')}</span><span class="l-todo">${tr('à compléter')}</span></div>`;
+  } else if (!pageHasForm()) {
+    const canOpen = S.app?.job?.url && S.app.status !== 'soumise' && primaryAction()?.kind !== 'applyJob';
+    body += `<div class="empty small">${tr('Ouvre le formulaire de candidature, puis lance le remplissage.')}</div>
+      ${canOpen ? `<div class="row"><button type="button" class="btn" data-action="applyJob">${tr('Postuler / connexion')}</button>${infoButton('info-apply')}</div>${infoBody('info-apply', tr('Ouvre dans ce navigateur : une session Workday valide est réutilisée. Compte propre à chaque entreprise ; mots de passe gérés par Chrome.'))}` : ''}`;
+  } else {
+    body += `<div class="small muted">${tr('Prêt : relis le résultat, puis passe à l’étape suivante du formulaire.')}</div>`;
   }
-  const submitted = S.app?.status === 'soumise';
-  el.innerHTML = `<h2>${tr('Remplissage')}</h2>
-    <button class="btn primary big" data-action="fill" ${S.diagnosticBusy ? 'disabled' : ''}>${tr(S.fill ? 'Remplir à nouveau' : 'Remplir cette page')}</button>
-    ${S.page?.platform === 'successfactors' ? `<button type="button" class="btn big" data-action="prepareDocuments" ${S.diagnosticBusy ? 'disabled' : ''}>${tr('Préparer et joindre CV + lettre')}</button><div class="small muted">${tr('Génère la lettre manquante et son PDF, puis joint les documents sans soumettre. Aucun remplacement automatique.')}</div>` : ''}
-    ${opts}${body}
-    <div class="row" style="margin-top:10px">
-      <button class="btn ghost" data-action="memorize" title="${tr('Retenir tes réponses aux questions de cette page pour les prochaines candidatures')}">${tr('Mémoriser mes réponses')}</button>
-      <span class="grow"></span>
-      ${S.app ? `<button class="btn ${submitted ? '' : 'primary'}" data-action="submitted" ${submitted ? 'disabled' : ''}>${tr(submitted ? 'Soumise ✓' : 'J’ai soumis ✓')}</button>` : ''}
-    </div>
-    <div class="small muted" style="margin-top:6px">${tr('ApplyPilot ne clique jamais sur « Soumettre » : vérifie la page, passe à l’étape suivante, puis relance le remplissage.')}</div>`;
+  const documents = S.page?.platform === 'successfactors'
+    ? `<div class="row"><button type="button" class="btn" data-action="prepareDocuments" ${S.diagnosticBusy ? 'disabled' : ''}>${tr('Préparer et joindre CV + lettre')}</button>${infoButton('info-documents')}</div>
+      ${infoBody('info-documents', tr('Génère la lettre manquante et son PDF, puis joint les documents sans soumettre. Aucun remplacement automatique.'))}`
+    : '';
+  el.innerHTML = `<div class="block">${body}${documents}${options}</div>`;
+  renderStepper();
+  renderSubmit();
+}
+
+export function renderSubmit() {
+  const el = $('#submitCard');
+  if (!el) return;
+  if (!S.app) {
+    el.innerHTML = `<div class="empty small">${tr('Analyse d’abord une offre pour suivre sa soumission.')}</div>
+      <div class="row"><button type="button" class="btn ghost" data-action="memorize">${tr('Mémoriser mes réponses')}</button></div>`;
+    return;
+  }
+  const submitted = S.app.status === 'soumise';
+  el.innerHTML = `<div class="block"><div class="rule"><span aria-hidden="true">🔒</span><span>${tr('ApplyPilot ne clique jamais sur « Soumettre » : tu envoies toi-même le formulaire.')}</span>${infoButton('info-submit')}</div>
+    ${infoBody('info-submit', tr('ApplyPilot ne clique jamais sur « Soumettre » : vérifie la page, passe à l’étape suivante, puis relance le remplissage.'))}
+    <div class="row block-actions">
+      <button type="button" class="btn ${submitted ? '' : 'primary'}" data-action="submitted" ${submitted ? 'disabled' : ''}>${tr(submitted ? 'Soumise ✓' : 'J’ai soumis ✓')}</button>
+      <button type="button" class="btn ghost" data-action="memorize" title="${tr('Retenir tes réponses aux questions de cette page pour les prochaines candidatures')}">${tr('Mémoriser mes réponses')}</button>
+    </div></div>`;
 }

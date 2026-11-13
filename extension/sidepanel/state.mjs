@@ -62,7 +62,17 @@ export const S = {
   profileDraft: {},
   profileBusy: false,
   tab: 'home',
+  step: null, // étape ouverte choisie par l’utilisateur (null = suggestion automatique)
+  seen: {}, // avis déjà lus (chrome.storage.local.seenNotices)
+  infoOpen: new Set(),
+  optionsOpen: false,
+  pageContext: '',
 };
+
+export async function markSeen(key) {
+  S.seen[key] = true;
+  try { await chrome.storage.local.set({ seenNotices: S.seen }); } catch { /* préférence facultative */ }
+}
 
 export async function savePrefs() {
   await chrome.storage.local.set({ prefs: S.prefs });

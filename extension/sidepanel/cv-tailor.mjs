@@ -1,7 +1,7 @@
 // Per-posting CV copy: explicit request, before/after review, opt-in use for forms. One application at a time.
 export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onChange = () => {}, ask = text => confirm(text), openTab = url => chrome.tabs.create({ url }), locale = () => 'en-CA' }) {
   let context = null, element = null, controller = null, revision = 0;
-  let report = null, loading = false, running = false, error = '', disabled = false, expanded = false;
+  let report = null, loading = false, running = false, error = '', disabled = false, expanded = false, infoOpen = false;
   const same = (captured, token) => context?.key === captured.key && revision === token;
   const stale = value => value && (value.baseChanged || value.jobChanged || value.cvChanged);
   const list = items => esc((items || []).join(', '));
@@ -23,7 +23,7 @@ export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onCha
     else if (state === 'restart') body = `<div class="small muted">${esc(tr('Redémarre le serveur ApplyPilot pour adapter le CV à l’offre.'))}</div>`;
     else if (state === 'latex') body = `<div class="small muted">${esc(tr('LaTeX (pdflatex) est introuvable : installe MiKTeX ou TeX Live pour adapter le CV.'))}</div>`;
     else if (running) body = `<div class="small muted" role="status">${esc(tr('Adaptation du CV en cours…'))}</div><div class="row"><button type="button" class="btn" data-ct-action="stop">${esc(tr('Arrêter'))}</button></div>`;
-    else if (!context.application.cvTailored) body = `<div class="small muted">${esc(tr('Modifie seulement « À propos » et l’ordre des compétences, à partir de tes faits. Ton CV d’origine n’est pas touché.'))}</div><div class="row">${button('tailor', 'Adapter le CV à cette offre', 'primary', context.application.status === 'soumise')}</div>`;
+    else if (!context.application.cvTailored) body = `<div class="small muted">${esc(tr('Réécrit « À propos » et l’ordre des compétences pour cette offre.'))}</div><div class="row">${button('tailor', 'Adapter le CV à cette offre', '', context.application.status === 'soumise')}</div>`;
     else if (!report) body = `<div class="small muted" role="status">${esc(tr(error || (loading ? 'Chargement du CV adapté…' : 'CV adapté indisponible.')))}</div><div class="row">${button('discard', 'Supprimer')}</div>`;
     else {
       const date = new Date(report.createdAt).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' });
@@ -40,7 +40,7 @@ export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onCha
         <label class="small" style="display:block;margin:6px 0"><input type="checkbox" data-ct-use ${context.application.cvTailored.useForForms ? 'checked' : ''} ${locked || old ? 'disabled' : ''}> ${esc(tr('Utiliser ce CV adapté pour les formulaires de cette candidature'))}</label>
         <div class="row">${button('preview', 'Aperçu du CV adapté')}${button('tailor', 'Régénérer', '', context.application.status === 'soumise')}${button('discard', 'Supprimer')}</div>`;
     }
-    element.innerHTML = `<div class="cv-tailor"><div class="small"><strong>${esc(tr('CV adapté à l’offre'))}</strong></div>${body}<div class="small ${error && report ? 'cv-file-error' : 'muted'}" role="status" aria-live="polite">${report ? esc(tr(error)) : ''}</div></div>`;
+    element.innerHTML = `<div class="cv-tailor"><div class="cv-tailor-head"><strong>${esc(tr('CV adapté à l’offre'))}</strong><button type="button" class="info-btn" data-ct-info aria-expanded="${infoOpen}" aria-label="${esc(tr('Plus de détails'))}">ⓘ</button></div><div class="info-body" ${infoOpen ? '' : 'hidden'}>${esc(tr('Modifie seulement « À propos » et l’ordre des compétences, à partir de tes faits. Ton CV d’origine n’est pas touché.'))}</div>${body}<div class="small ${error && report ? 'cv-file-error' : 'muted'}" role="status" aria-live="polite">${report ? esc(tr(error)) : ''}</div></div>`;
     element.querySelector('details')?.addEventListener('toggle', event => { expanded = event.target.open; });
   }
 
@@ -63,7 +63,7 @@ export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onCha
     const captured = context;
     if (!captured?.available || running || disabled || !canAct() || status() !== 'ready') return;
     const { application, cv } = captured;
-    if (!ask(tr('Adapter le CV « {cv} » à « {title} » — {company} ?\nSeuls « À propos » et l’ordre des compétences changent, uniquement à partir de tes faits. Utilise le quota habituel de pi. Ton CV d’origine n’est pas modifié.{replace}', { cv: cv?.name || captured.cvId, title: application.job?.title || '', company: application.job?.company || '', replace: application.cvTailored ? `\n${tr('La copie précédente sera remplacée.')}` : '' }))) return;
+    if (!ask(tr('Adapter le CV « {cv} » à « {title} » — {company} ?\nSeuls « À propos » et l’ordre des compétences changent, uniquement à partir de tes faits. Utilise ton quota IA habituel. Ton CV d’origine n’est pas modifié.{replace}', { cv: cv?.name || captured.cvId, title: application.job?.title || '', company: application.job?.company || '', replace: application.cvTailored ? `\n${tr('La copie précédente sera remplacée.')}` : '' }))) return;
     controller?.abort(); controller = new AbortController();
     const mine = controller, token = ++revision;
     running = true; error = ''; render();
@@ -116,6 +116,7 @@ export function createCvTailor({ api, tr, esc, toast, canAct = () => true, onCha
     if (reload) { controller?.abort(); ++revision; report = null; loading = false; running = false; error = ''; expanded = false; }
     context = { ...next, key, loadKey }; element = next.element; disabled = !!next.disabled;
     element.onclick = event => {
+      if (event.target.closest('[data-ct-info]')) { infoOpen = !infoOpen; render(); return; }
       const target = event.target.closest('[data-ct-action]');
       if (!target || target.disabled) return;
       event.preventDefault();

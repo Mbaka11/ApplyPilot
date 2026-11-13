@@ -1,11 +1,13 @@
 // Called from real-extension E2E; the test server simulates all native launches.
 import fs from 'node:fs';
 import path from 'node:path';
+import { openStep } from './panel-steps.mjs';
 export async function testSelectedCv({ panel, site, sw, apiBase, out, check }) {
   const request = route => fetch(apiBase + route).then(response => response.json());
   const set = (selector, value) => panel.$eval(selector, (element, value) => { element.value = value; element.dispatchEvent(new Event('input', { bubbles: true })); }, value);
   await panel.setViewport({ width: 420, height: 1000 });
   await panel.click('[data-tab="app"]');
+  await openStep(panel, 'docs');
   await panel.waitForFunction(() => !!document.querySelector('#cvInspector .cv-file-path') && !document.querySelector('[data-cv-action="preview"]').disabled);
   const initialId = await panel.$eval('#cvSelect', element => element.value);
   const { applications } = await request('/applications');
@@ -14,7 +16,7 @@ export async function testSelectedCv({ panel, site, sw, apiBase, out, check }) {
   const initialPath = await panel.$eval('.cv-file-path', element => element.textContent);
   const initialSubject = await panel.$eval('#letterSubject', element => element.value);
   await set('#letterSubject', initialSubject + ' — unsaved CV preview draft');
-  await panel.$eval('#letterCard details', element => { element.open = true; });
+  await panel.$eval('#letterCard details.instructions', element => { element.open = true; });
   await set('#letterInstructions', 'Unsaved CV inspection instructions');
   await site.evaluate(() => { globalThis.cvPreviewSentinel = 'preserve form'; });
   const fieldsBefore = await site.$$eval('input, textarea, select', elements => elements.map(element => [element.id, element.value]));
@@ -81,10 +83,10 @@ export async function testSelectedCv({ panel, site, sw, apiBase, out, check }) {
   await panel.waitForFunction(id => document.querySelector('.cv-file-path')?.textContent.endsWith(id + '.pdf') && !document.querySelector('[data-cv-action="preview"]').disabled, {}, initialId);
   await panel.$eval('#cvInspector details', element => { element.open = true; });
   await panel.setViewport({ width: 320, height: 1000 });
-  check('long CV filenames and full paths fit the 320px side panel', await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  check('long CV filenames and full paths fit the 320px side panel', await panel.evaluate(() => [document.documentElement, document.querySelector('main')].every(element => element.scrollWidth <= element.clientWidth)));
   await panel.setViewport({ width: 420, height: 1000 });
   await panel.evaluate(() => { window.scrollTo(0, 0); document.querySelector('#toast').className = 'toast'; });
-  const height = await panel.$eval('#appCard', element => Math.ceil(element.getBoundingClientRect().bottom + scrollY + 15));
+  const height = await panel.$eval('#stepper', element => Math.ceil(element.getBoundingClientRect().bottom + scrollY + 15));
   await panel.screenshot({ path: path.join(out, 'cv-preview-en.png'), clip: { x: 0, y: 0, width: 420, height }, captureBeyondViewport: true });
   const after = (await request(`/applications/${appId}`)).application;
   check('CV inspection preserves unsaved letter subject and instructions', (await panel.$eval('#letterSubject', element => element.value)) === initialSubject + ' — unsaved CV preview draft' && (await panel.$eval('#letterInstructions', element => element.value)) === 'Unsaved CV inspection instructions');

@@ -1,6 +1,6 @@
 // Onglet Profil : éditeur de profil, CV, réponses mémorisées et connexion au serveur.
 import { S, DEFAULT_SERVER } from '../state.mjs';
-import { $, esc, tr, toast } from '../ui.mjs';
+import { $, esc, tr, toast, infoButton, infoBody } from '../ui.mjs';
 import { api, checkServer } from '../api.mjs';
 import { cvInspector, cvTailor } from './application.mjs';
 import { searchPanel } from './search.mjs';
@@ -70,7 +70,7 @@ export async function reloadProfile() {
 export async function renderProfile({ refresh = true } = {}) {
   const el = $('#tab-profile');
   if (!S.health) {
-    el.innerHTML = `<div class="card"><h2>${tr('Serveur')}</h2>${serverForm()}</div>`;
+    el.innerHTML = `<div class="card"><h2>${tr('Profil')}</h2><div class="empty small">${tr('Serveur non connecté.')}</div><button type="button" class="btn" data-tab="settings">${tr('Réglages')}</button></div>`;
     return;
   }
   let data;
@@ -80,7 +80,7 @@ export async function renderProfile({ refresh = true } = {}) {
       S.profileResponse = data;
     } else data = S.profileResponse;
   } catch (err) {
-    el.innerHTML = `<div class="card"><h2>${tr('Profil')}</h2><div class="small" style="color:var(--bad)">${esc(tr(err.message))}</div><button class="btn" data-action="reloadProfile">${tr('Réessayer')}</button></div>`;
+    el.innerHTML = `<div class="card"><h2>${tr('Profil')}</h2><div class="small text-bad">${esc(tr(err.message))}</div><button class="btn" data-action="reloadProfile">${tr('Réessayer')}</button></div>`;
     return;
   }
   const dirty = Object.keys(S.profileDraft).length > 0;
@@ -95,34 +95,27 @@ export async function renderProfile({ refresh = true } = {}) {
     ${groups.map((group, i) => `<details class="profile-group" ${i < 2 ? 'open' : ''}><summary>${esc(tr(group))}</summary>${S.profileFields.filter((f) => f.group === group).map(profileField).join('')}</details>`).join('')}
     <div class="profile-save row"><button type="button" class="btn primary" data-action="saveProfile">${tr('Enregistrer le profil')}</button>
       <button type="button" class="btn" data-action="reloadProfile">${tr('Recharger')}</button></div>
-    </form>` : `<div class="small" style="color:var(--warn)">${tr('Redémarre le serveur pour activer l’éditeur de profil.')}</div>`;
+    </form>` : `<div class="small text-warn">${tr('Redémarre le serveur pour activer l’éditeur de profil.')}</div>`;
   const h = { ...S.health, warnings: data.warnings || S.health.warnings };
   const mem = Object.entries(S.memory.items || {}).sort((a, b) => String(b[1].lastUsedAt).localeCompare(String(a[1].lastUsedAt)));
   el.innerHTML = `
     <div class="card"><h2>${tr('Profil')}</h2>
       <div class="small">${tr('Fichier :')} <span class="kbd">${esc(h.profileFile)}</span></div>
-      ${h.profileError ? `<div class="small" style="color:var(--bad)">${esc(tr(h.profileError))}</div>` : ''}
-      ${h.warnings?.length ? `<div style="margin-top:8px"><b class="small">${tr('À compléter')}:</b><ul class="warnings">${h.warnings.map((w) => `<li>${esc(tr(w.label))} <span class="muted">(${esc(w.path)})</span></li>`).join('')}</ul></div>` : `<div class="small" style="color:var(--ok);margin-top:6px">${tr('Champs essentiels renseignés ✓')}</div>`}
-      <div class="small muted" style="margin-top:6px">${tr('Enregistre ici tes coordonnées, disponibilités et réponses d’admissibilité. Vide / « Je réponds moi-même » = aucune réponse inventée. Sauvegarde privée automatique avant chaque modification.')}</div>
-      ${conflict ? `<div class="small" style="color:var(--warn)">${tr('Le fichier a changé ailleurs. Tes saisies sont conservées ; utilise « Recharger » avant de réessayer.')}</div>` : ''}
+      ${h.profileError ? `<div class="small text-bad">${esc(tr(h.profileError))}</div>` : ''}
+      ${h.warnings?.length ? `<div style="margin-top:8px"><b class="small">${tr('À compléter')}:</b><ul class="warnings">${h.warnings.map((w) => `<li>${esc(tr(w.label))} <span class="muted">(${esc(w.path)})</span></li>`).join('')}</ul></div>` : `<div class="small text-ok">${tr('Champs essentiels renseignés ✓')}</div>`}
+      <div class="row small muted"><span class="grow">${tr('Vide ou « Je réponds moi-même » : aucune réponse inventée.')}</span>${infoButton('info-profile')}</div>
+      ${infoBody('info-profile', `<p>${tr('Enregistre ici tes coordonnées, disponibilités et réponses d’admissibilité. Vide / « Je réponds moi-même » = aucune réponse inventée. Sauvegarde privée automatique avant chaque modification.')}</p><p>${tr('Les expériences et formations détaillées restent dans le YAML. Modifier le profil ne modifie pas les CV PDF ni les lettres déjà générées.')}</p>`)}
+      ${conflict ? `<div class="small text-warn">${tr('Le fichier a changé ailleurs. Tes saisies sont conservées ; utilise « Recharger » avant de réessayer.')}</div>` : ''}
       ${editor}
-      <div class="small muted">${tr('Les expériences et formations détaillées restent dans le YAML. Modifier le profil ne modifie pas les CV PDF ni les lettres déjà générées.')}</div>
     </div>
     <div class="card"><h2>CV (${S.cvs.length})</h2>
       <div class="small">${tr('Dossier :')} <span class="kbd">${esc(h.cvDir || tr('non configuré'))}</span></div>
-      ${h.cvError ? `<div class="small" style="color:var(--bad)">${esc(tr(h.cvError))}</div>` : ''}
+      ${h.cvError ? `<div class="small text-bad">${esc(tr(h.cvError))}</div>` : ''}
       <ul class="list">${S.cvs.map((c) => `<li class="small"><b>${esc(c.name)}</b> <span class="badge grey">${esc((c.language || '?').toUpperCase())}</span> ${c.hasTex ? `<span class="badge ok">${tr('.tex lu')}</span>` : `<span class="badge warn">${tr('pas de .tex')}</span>`}${c.tags?.length ? `<div class="muted">${tr('Mots-clés :')} ${esc(c.tags.join(', '))}</div>` : ''}<div class="row cv-file-actions"><button type="button" class="btn" data-profile-cv="${esc(c.id)}" data-open-url="${esc(`${S.server}/cvs/${encodeURIComponent(c.id)}/pdf?t=${Date.now()}`)}">${tr('Aperçu du CV')}</button></div></li>`).join('')}</ul>
     </div>
     <div class="card"><h2>${tr('Réponses mémorisées')} (${mem.length})</h2>
       ${mem.length ? `<ul class="list">${mem.map(([k, m]) => `<li class="small"><div class="row"><b class="grow">${esc(m.label)}</b><button class="btn ghost danger" data-forget="${esc(k)}">✕</button></div><div>${esc(Array.isArray(m.value) ? m.value.join(', ') : String(m.value))}</div></li>`).join('')}</ul>` : `<div class="small muted">${tr('Tes réponses aux questions récurrentes (non couvertes par le profil) seront retenues quand tu passes à l’étape suivante d’un formulaire.')}</div>`}
-    </div>
-    <div class="card"><h2>${tr('Serveur')}</h2>${serverForm()}
-      <div class="small muted" style="margin-top:6px">pi : ${esc(h.pi)} · Chrome (PDF) : ${h.chrome ? 'OK' : tr('introuvable')}</div></div>`;
-}
-
-function serverForm() {
-  return `<div class="row"><input type="url" id="serverUrl" value="${esc(S.serverDraft ?? S.server)}" class="grow" style="width:auto">
-    <button class="btn" data-action="saveServer">${tr('Enregistrer')}</button></div>`;
+    </div>`;
 }
 
 export async function saveServer() {
