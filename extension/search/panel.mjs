@@ -2,8 +2,8 @@ import { CATEGORIES, SCOPES, searchDefaults, validateSettings, buildSearchPlan, 
 import { PLATFORMS, LOCATIONS, catalogMeta, filterCatalog, sortCatalog } from './catalog.mjs';
 import { runGoogleSearch, searchDelay } from './runner.mjs';
 
-export function createSearchPanel({ element, onRunChange = () => {}, api, tr, esc, fmtDate, toast, infoButton, infoBody, canStart, activateApplication }) {
-  const state = { settings: null, jobs: [], loaded: false, dirty: false, loading: false, mutating: false, revision: 0, run: null, progress: null, message: '', messageValues: {}, tone: '', lastTabId: null,
+export function createSearchPanel({ element, onRunChange = () => {}, api, tr, esc, fmtDate, toast, infoButton, infoBody, canStart, activateApplication, onMeta = () => {} }) {
+  const state = { settings: null, jobs: [], meta: null, loaded: false, dirty: false, loading: false, mutating: false, revision: 0, run: null, progress: null, message: '', messageValues: {}, tone: '', lastTabId: null,
     filter: 'visible', kind: 'job', platform: 'all', source: 'all', location: 'all', text: '', sort: 'published-desc', limit: 30,
     draft: { links: '', title: '', company: '', location: '', employerUrl: '', description: '' }, detailsOpen: false, planOpen: false, settingsOpen: false, manualOpen: false };
   const busy = () => !!state.run || state.mutating || state.loading;
@@ -13,6 +13,7 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
   function feedback(message, tone = '', values = {}) { state.message = message; state.messageValues = values; state.tone = tone; renderProgress(); }
   function adopt(data, { settings = false } = {}) {
     state.jobs = data.jobs || [];
+    if (data.meta) { state.meta = data.meta; onMeta(data.meta); }
     if (!state.settings || settings || !state.dirty) state.settings = data.settings || searchDefaults();
     state.loaded = true;
   }
@@ -31,9 +32,10 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
       $('#searchPlan').innerHTML = entries.map(([name, rows]) => `<li><b>${esc(name)}</b><ol>${rows.map(row => `<li>${esc(row.query)}${row.location ? ` · ${esc(row.location)}${row.remote ? ' · Remote' : ''}` : ''}</li>`).join('')}</ol></li>`).join('');
     } catch { $('#searchPlan').innerHTML = `<li>${label('Complète les filtres pour voir les requêtes.')}</li>`; }
   }
+  const isNew = job => job.status === 'new' && !!state.meta?.lastSeenAt && job.firstSeenAt > state.meta.lastSeenAt;
   function renderCatalog() {
     if (!$('#searchJobs')) return;
-    const jobs = sortCatalog(filterCatalog(state.jobs, { status: state.filter, kind: state.kind, platform: state.platform, source: state.source, location: state.location, text: state.text }), state.sort);
+    const jobs = sortCatalog(filterCatalog(state.jobs, { status: state.filter === 'since' ? 'new' : state.filter, kind: state.kind, platform: state.platform, source: state.source, location: state.location, text: state.text, since: state.filter === 'since' ? state.meta?.lastSeenAt || '' : '' }), state.sort);
     const counts = { job: 0, unknown: 0, listing: 0 };
     state.jobs.forEach(job => counts[catalogMeta(job).kind]++);
     $('#searchCount').textContent = tr('{shown} / {total} liens', { shown: jobs.length, total: state.jobs.length });
@@ -43,7 +45,7 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
       const meta = catalogMeta(job), title = job.title || new URL(job.url).hostname, url = meta.preferredUrl;
       const platforms = meta.platforms.map(platform => `<span class="platform-badge platform-${platform}"><span aria-hidden="true" class="platform-icon">${platform === 'linkedin' ? 'in' : platform === 'indeed' ? 'i' : platform === 'employer' ? '↗' : '•'}</span>${label(PLATFORMS[platform])}</span>`).join('');
       return `<article class="card search-job" data-discovery-id="${esc(job.id)}">
-        <div class="row">${platforms}${job.status === 'saved' ? `<span class="badge ok">${label('Enregistrée')}</span>` : ''}${job.status === 'hidden' ? `<span class="badge grey">${label('Masquée')}</span>` : ''}</div>
+        <div class="row">${platforms}${isNew(job) ? `<span class="badge warn search-new">${label('Nouvelle')}</span>` : ''}${job.status === 'saved' ? `<span class="badge ok">${label('Enregistrée')}</span>` : ''}${job.status === 'hidden' ? `<span class="badge grey">${label('Masquée')}</span>` : ''}</div>
         <h3>${esc(title)}</h3><div class="small muted">${esc([job.company, job.location].filter(Boolean).join(' · '))}</div>
         <div class="row small muted search-provenance">${label('Trouvée via')} ${meta.discoveryMethods.map(method => esc(methods[method] || method)).join(' · ')}</div>
         <div class="small muted">${job.postedAt ? esc(tr('Publiée le {date}', { date: fmtDate(job.postedAt + 'T12:00:00Z') })) : esc(tr('Repérée le {date}', { date: fmtDate(job.lastSeenAt) }))} · <span title="${label('Score lexical indicatif, pas une décision d’admissibilité.')}">${job.score}/100</span></div>
@@ -88,7 +90,7 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
       ${select('searchKind', 'Type de lien', [['job', 'Offres identifiées'], ['unknown', 'Liens à vérifier'], ['listing', 'Pages de résultats'], ['all', 'Tous les liens']], state.kind)}
       <div class="search-filter-grid"><div>${select('searchPlatform', 'Plateforme', [['all', 'Toutes les plateformes'], ...Object.entries(PLATFORMS)], state.platform)}</div><div>${select('searchSource', 'Découverte', [['all', 'Toutes les provenances'], ['linkedin-public', 'LinkedIn public'], ['google', 'Google'], ['manual', 'Ajout manuel']], state.source)}</div></div>
       ${select('searchLocation', 'Lieu', [['all', 'Tous les lieux'], ...Object.entries(LOCATIONS)], state.location)}
-      <div class="row">${select('searchState', 'État', [['visible', 'Non masquées'], ['new', 'Nouvelles'], ['saved', 'Enregistrées'], ['hidden', 'Masquées'], ['all', 'Toutes les offres']], state.filter)}${button('reload', 'Actualiser')}</div>
+      <div class="row">${select('searchState', 'État', [['visible', 'Non masquées'], ['since', 'Nouvelles depuis ma dernière visite'], ['new', 'Nouvelles'], ['saved', 'Enregistrées'], ['hidden', 'Masquées'], ['all', 'Toutes les offres']], state.filter)}${button('reload', 'Actualiser')}</div>
       ${select('searchSort', 'Trier par', [['relevance', 'Pertinence'], ['published-desc', 'Publication : plus récentes'], ['published-asc', 'Publication : plus anciennes']], state.sort)}
       <div class="small muted">${label('Les offres sans date de publication restent en bas du tri par date.')}</div>
       <label for="searchText">${label('Filtrer titre / entreprise / lieu')}</label><input type="text" id="searchText" value="${esc(state.text)}" maxlength="200">
@@ -158,12 +160,27 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
       feedback(error.name === 'AbortError' ? 'Recherche arrêtée. Les résultats déjà enregistrés sont conservés.' : error.message, error.name === 'AbortError' ? '' : 'error');
     } finally { if (state.run === run) { state.run = null; render(); } }
   }
+  // Un clic = une exécution bornée de la dernière recherche (même source, même zone), jamais en arrière-plan.
+  async function rerunLast() {
+    const last = state.meta?.lastRun;
+    if (busy() || !last || !['google', 'linkedin-public'].includes(last.source)) return;
+    if (!state.settings) await load();
+    if (!state.settings || busy()) return;
+    if (Object.hasOwn(SCOPES, last.scope) && state.settings.scope !== last.scope) { state.settings = { ...state.settings, scope: last.scope }; state.dirty = true; }
+    return start(last.source);
+  }
+  // En quittant l'onglet seulement (pas à l'ouverture) : les pastilles « Nouvelle » ont pu être lues.
+  async function leave() {
+    if (busy() || !state.loaded || !state.meta?.newCount) return;
+    try { adopt(await api('/search/seen', { method: 'POST' })); renderCatalog(); } catch { /* la pastille reste, sans gravité */ }
+  }
+  function showNew() { state.filter = 'since'; state.kind = 'job'; state.limit = 30; if (state.settings) render(); }
   function stop({ quiet = false } = {}) {
     if (!state.run) return;
     const run = state.run; state.run = null; run.controller.abort();
     if (!quiet) feedback('Recherche arrêtée. Les résultats déjà enregistrés sont conservés.'); render();
   }
-  function reset() { stop({ quiet: true }); ++state.revision; state.jobs = []; state.loaded = false; state.loading = false; state.mutating = false; render(); }
+  function reset() { stop({ quiet: true }); ++state.revision; state.jobs = []; state.meta = null; state.loaded = false; state.loading = false; state.mutating = false; render(); }
   const actions = {
     start: () => start('google'), startLinkedIn: () => start('linkedin-public'), stop, reload: load,
     clear: async () => {
@@ -204,5 +221,5 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
   }
   element.addEventListener('input', input); element.addEventListener('change', input);
   element.addEventListener('submit', event => event.preventDefault());
-  return { show: load, render, stop, reset, get running() { return !!state.run; }, get progress() { return state.progress; } };
+  return { show: load, render, stop, reset, rerunLast, leave, showNew, get meta() { return state.meta; }, get running() { return !!state.run; }, get progress() { return state.progress; } };
 }

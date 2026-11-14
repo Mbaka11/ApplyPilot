@@ -44,6 +44,10 @@ export const S = {
   cvBusy: false,
   switching: false,
   searchSummary: null,
+  searchMeta: null, // { lastRunAt, lastSeenAt, lastRun, newCount } du catalogue de recherche
+  journalView: 'list', // 'list' | 'stats'
+  stats: null,
+  usage: null, // { day, week, month } : résumés de /usage
   letterGeneration: null,
   page: null,
   pageError: '',

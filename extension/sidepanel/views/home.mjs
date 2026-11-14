@@ -1,6 +1,7 @@
 // Onglet Accueil : une carte « Contexte », les compteurs et les candidatures récentes.
 import { S } from '../state.mjs';
-import { $, esc, tr, statusLabel } from '../ui.mjs';
+import { $, esc, tr, statusLabel, fmtDate } from '../ui.mjs';
+import { searchPanel } from './search.mjs';
 import { hasLetterDraft } from './application.mjs';
 
 const BADGE = { soumise: 'ok', entrevue: 'warn', offre: 'ok', refusée: 'bad' };
@@ -29,12 +30,27 @@ function contextCard() {
   return `<div class="card context"><h2>${tr('Maintenant')}</h2><div class="stack">${body}</div>${open}</div>`;
 }
 
+function newOffersCard() {
+  const meta = S.searchMeta;
+  if (!meta || !S.health) return '';
+  const last = meta.lastRun && ['google', 'linkedin-public'].includes(meta.lastRun.source) && meta.lastRunAt ? meta.lastRun : null;
+  const count = meta.newCount || 0;
+  if (!last && !count) return '';
+  const running = searchPanel.running;
+  const source = last ? tr(last.source === 'google' ? 'Google' : 'LinkedIn public') : '';
+  return `<div class="card new-offers">
+    ${count ? `<button type="button" class="new-count" data-action="showNewOffers">${esc(tr('{count} nouvelle(s) offre(s) depuis ta dernière visite', { count }))}</button>` : ''}
+    ${last ? `<div class="row small"><span class="grow muted">${esc(tr('Dernière recherche : {date}', { date: fmtDate(meta.lastRunAt) }))} · ${esc(source)}</span>
+      <button type="button" class="btn sm" data-action="rerunSearch" ${running || !S.health ? 'disabled' : ''}>${tr(running ? 'Recherche en cours…' : 'Relancer')}</button></div>` : ''}
+  </div>`;
+}
+
 export function renderHome() {
   const el = $('#tab-home');
   const ongoing = S.apps.filter(app => app.status === 'en cours').length;
   const sent = S.apps.filter(app => app.status === 'soumise').length;
   const recent = S.apps.slice(0, 5);
-  el.innerHTML = `${contextCard()}
+  el.innerHTML = `${contextCard()}${newOffersCard()}
     <div class="metrics">
       <button type="button" class="metric" data-tab="search"><b>${S.searchSummary?.identified ?? '—'}</b><span>${tr('Offres identifiées')}</span></button>
       <button type="button" class="metric" data-tab="journal"><b>${ongoing}</b><span>${tr('En cours')}</span></button>

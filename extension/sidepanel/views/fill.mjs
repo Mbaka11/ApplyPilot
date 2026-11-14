@@ -272,6 +272,12 @@ const RES_GROUPS = [
   ['ok', 'Remplis', 'ok'],
   ['kept', 'Déjà remplis (non modifiés)', 'grey'],
 ];
+/** Pastille d'une réponse mémorisée : « à adapter » (valeur reprise telle quelle) ou « Adaptée de {entreprise} » (réécrite par l'IA). */
+function adaptChip(r) {
+  const adapted = /^Adaptée de /.test(r.note || '') ? r.note.split(' : ')[0] : '';
+  if (adapted) return ` <span class="badge warn adapt-chip">${esc(tr(adapted))}</span>`;
+  return r.needsAdaptation ? ` <span class="badge warn adapt-chip">${esc(tr('à adapter'))}</span>` : '';
+}
 const groupOf = (r) => (r.status === 'fail' || r.status === 'unresolved' ? 'todo' : r.status === 'skip' ? 'check' : r.status);
 
 export function renderFill() {
@@ -314,7 +320,7 @@ export function renderFill() {
       if (!list?.length) continue;
       const items = list
         .map(
-          (r) => `<li class="${k}" data-focus="${esc(r.id)}" tabindex="0"><div><span class="lbl">${esc(r.label === '(sans libellé)' ? tr(r.label) : r.label)}</span>${r.required ? ' <span class="muted">*</span>' : ''}</div>
+          (r) => `<li class="${k}" data-focus="${esc(r.id)}" tabindex="0"><div><span class="lbl">${esc(r.label === '(sans libellé)' ? tr(r.label) : r.label)}</span>${r.required ? ' <span class="muted">*</span>' : ''}${adaptChip(r)}</div>
           ${r.value ? `<div class="val">${esc(['checkbox', 'checkboxes'].includes(r.kind) ? tr(r.value) : r.value)}</div>` : ''}${r.note ? `<div class="note">${esc(tr(r.note))}${r.source === 'ia' ? ` · ${tr('IA')}` : ''}</div>` : ''}</li>`,
         )
         .join('');

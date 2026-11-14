@@ -34,7 +34,8 @@ export async function checkServer() {
     S.apps = applications;
     if (statuses) S.statuses = statuses;
     try {
-      const { jobs } = await api('/search');
+      const { jobs, meta } = await api('/search');
+      S.searchMeta = meta || null;
       S.searchSummary = { total: jobs.length, identified: jobs.filter(job => catalogMeta(job).kind === 'job').length, saved: jobs.filter(job => job.status === 'saved').length };
     } catch { S.searchSummary = null; }
   } catch (e) {

@@ -378,3 +378,31 @@ details.options, details.instructions { margin-top: var(--sp-2); }
   .tabs button { font-size: var(--fs-sm); }
   .step-sum { display: none; }
 }
+
+/* ---- 0.9.0 : nouvelles offres, statistiques, usage IA ----------------------- */
+.new-count { display: block; width: 100%; text-align: left; border: 0; background: var(--accent-soft); color: var(--accent); font: inherit; font-weight: 600; border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); cursor: pointer; margin-bottom: var(--sp-2); }
+.new-offers > .new-count:last-child { margin-bottom: 0; }
+.seg { display: flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; margin-bottom: var(--sp-3); }
+.seg button { flex: 1; min-height: var(--control); border: 0; background: var(--card); color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.stats-h { font-size: var(--fs); margin: 0 0 var(--sp-2); }
+.funnel { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: grid; gap: 2px; }
+.funnel li { display: grid; grid-template-columns: minmax(84px, 36%) 1fr 2.5em; align-items: center; gap: var(--sp-2); }
+.funnel-label { font-size: var(--fs-sm); color: var(--text); overflow-wrap: anywhere; }
+.funnel-bar { display: block; height: 14px; background: var(--card-2); border-radius: 0 4px 4px 0; }
+.funnel-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; }
+.funnel-n { text-align: right; font-variant-numeric: tabular-nums; }
+.stats-responses { margin-bottom: var(--sp-2); }
+.stats-table { width: 100%; border-collapse: collapse; margin: var(--sp-3) 0; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.stats-table caption { text-align: left; font-weight: 700; padding-bottom: var(--sp-1); }
+.stats-table th, .stats-table td { padding: 3px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+.stats-table th[scope="col"] { color: var(--muted); font-weight: 600; }
+.stats-table th:first-child, .stats-table td:first-child { text-align: left; overflow-wrap: anywhere; }
+.stats-table tbody th { font-weight: 400; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; margin: var(--sp-2) 0; }
+.usage-table th, .usage-table td { padding: 3px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+.usage-table th:first-child { text-align: left; font-weight: 400; color: var(--muted); }
+.usage-table thead th { color: var(--muted); font-weight: 600; }
+.usage-list { list-style: none; margin: var(--sp-1) 0 var(--sp-2); padding: 0; }
+.usage-list li { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 2px 0; }

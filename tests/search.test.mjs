@@ -256,7 +256,19 @@ test('a batch updates lastRunAt/lastRun, counts as new until seen, and leaves di
   updateDiscovery(view.jobs.find(j => j.url.endsWith('-2')).id, { status: 'saved' });
   assert.equal(getSearch().meta.newCount, 0);
 });
-test('the very first batch without any meta is still new; corrupt meta restarts safely; import records its source', () => {
+test('a manual import counts as new but never replaces the re-runnable last search', async () => {
+  reset(); saveSearchSettings(defaults);
+  getSearch();
+  addDiscoveries([sample], { source: 'google' });
+  const before = getSearch().meta;
+  await sleep(5);
+  addDiscoveries([{ ...sample, url: employer + '-manual' }], { source: 'manual' });
+  const after = getSearch().meta;
+  assert.deepEqual(after.lastRun, before.lastRun);
+  assert.equal(after.lastRunAt, before.lastRunAt);
+  assert.equal(after.newCount, 2);
+});
+test('the very first batch without any meta is still new; corrupt meta restarts safely; import is not a re-runnable search', () => {
   reset();
   addDiscoveries([sample]);
   assert.equal(getSearch().meta.newCount, 1);
@@ -265,7 +277,7 @@ test('the very first batch without any meta is still new; corrupt meta restarts 
   assert.equal(getSearch().meta.newCount, 0);
   assert.ok(Number.isFinite(Date.parse(JSON.parse(fs.readFileSync(metaFile, 'utf8')).lastSeenAt)));
   importDiscoveries({ links: employer + '-3' });
-  assert.equal(getSearch().meta.lastRun.source, 'manual');
+  assert.equal(getSearch().meta.lastRun, null); // a manual import is not a re-runnable search
 });
 test('meta writes are atomic (no temp file left, valid JSON after many runs)', () => {
   reset();

@@ -3,11 +3,28 @@ import { S } from '../state.mjs';
 import { $, esc, tr, toast, statusLabel, fmtDate } from '../ui.mjs';
 import { api, loadApps } from '../api.mjs';
 import { setActiveApp } from './application.mjs';
+import { statsHtml } from './stats.mjs';
+
+export async function loadStats() {
+  try { S.stats = await api('/stats'); } catch { S.stats = null; }
+}
+
+export async function setJournalView(view) {
+  S.journalView = view === 'stats' ? 'stats' : 'list';
+  renderJournal();
+  if (S.journalView === 'stats') { await loadStats(); if (S.journalView === 'stats') renderJournal(); }
+}
+
+const viewSwitch = () => `<div class="seg" role="group" aria-label="${esc(tr('Affichage du suivi'))}">${[['list', 'Liste'], ['stats', 'Statistiques']].map(([key, label]) => `<button type="button" data-journal-view="${key}" aria-pressed="${S.journalView === key}">${esc(tr(label))}</button>`).join('')}</div>`;
 
 export function renderJournal() {
   const el = $('#tab-journal');
   if (!S.health) {
     el.innerHTML = `<div class="card muted">${tr('Serveur non connecté.')}</div>`;
+    return;
+  }
+  if (S.journalView === 'stats') {
+    el.innerHTML = `<div class="card"><div class="card-head"><h2>${tr('Statistiques')}</h2></div>${viewSwitch()}${statsHtml(S.stats)}</div>`;
     return;
   }
   const counts = {};
@@ -30,6 +47,7 @@ export function renderJournal() {
     .join('');
   el.innerHTML = `<div class="card"><div class="card-head"><h2>${tr('Journal')} (${S.apps.length})</h2>
       <details class="more more-menu"><summary aria-label="${esc(tr('Plus d’actions'))}">⋯</summary><div class="more-body"><button type="button" class="btn" data-action="exportCsv">${tr('Exporter CSV')}</button></div></details></div>
+    ${viewSwitch()}
     <div class="summary">${Object.entries(counts).map(([s, n]) => `<span class="badge ${s === 'soumise' ? 'ok' : s === 'refusée' ? 'bad' : s === 'entrevue' || s === 'offre' ? 'warn' : ''}">${n} ${esc(statusLabel(s).toLowerCase())}</span>`).join('')}</div>
     ${S.apps.length ? `<ul class="list">${items}</ul>` : `<div class="empty small">${tr('Aucune candidature pour l’instant.')}</div>`}</div>`;
 }

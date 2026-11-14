@@ -4,9 +4,9 @@ import { $, tr } from '../ui.mjs';
 import { checkServer, loadApps } from '../api.mjs';
 import { renderHome } from './home.mjs';
 import { renderApp, syncCvControls } from './application.mjs';
-import { renderJournal } from './tracker.mjs';
+import { renderJournal, loadStats } from './tracker.mjs';
 import { renderProfile } from './profile.mjs';
-import { renderSettings } from './settings.mjs';
+import { renderSettings, loadUsage } from './settings.mjs';
 import { renderActionBar } from './actionbar.mjs';
 import { searchPanel } from './search.mjs';
 
@@ -71,6 +71,7 @@ export function renderStatus() {
 }
 
 export function switchTab(name) {
+  if (S.tab === 'search' && name !== 'search') searchPanel.leave(); // marque les offres comme vues en quittant, pas à l’ouverture
   S.tab = name;
   document.querySelectorAll('.tabs [data-tab], .top-actions [data-tab]').forEach((b) => {
     b.classList.toggle('active', b.dataset.tab === name);
@@ -78,9 +79,9 @@ export function switchTab(name) {
   });
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
   if (name === 'home') { renderHome(); checkServer(); }
-  if (name === 'journal') loadApps().then(renderJournal, () => renderJournal());
+  if (name === 'journal') loadApps().then(() => (S.journalView === 'stats' ? loadStats() : null)).then(renderJournal, () => renderJournal());
   if (name === 'profile') checkServer().then(renderProfile);
-  if (name === 'settings') checkServer().then(renderSettings);
+  if (name === 'settings') checkServer().then(loadUsage).then(renderSettings, renderSettings);
   if (name === 'app') renderApp();
   if (name === 'search') searchPanel.show();
   renderActionBar();

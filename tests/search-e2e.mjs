@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fitScreenshot } from './panel-steps.mjs';
+import { testNewOffers } from './insights-e2e.mjs';
 
 export async function testSearch({ browser, panel, site, sw, apiBase, out, check }) {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -224,6 +225,7 @@ export async function testSearch({ browser, panel, site, sw, apiBase, out, check
   check('clear confirmation covers all links including saved and hidden, not only filters', clearMessage.includes(String(beforeClear.jobs.length)) && clearMessage.includes('saved and hidden') && clearMessage.includes('Applications'));
   check('clear empties the catalog but preserves settings and applications', afterClear.jobs.length === 0 && JSON.stringify(afterClear.settings) === JSON.stringify(beforeClear.settings) && JSON.stringify((await request('/applications')).applications) === appsBefore);
   check('clear keeps an exact private rollback backup', fs.readdirSync(path.join(out, 'data', 'backups', 'search')).some(name => name.startsWith('discovery-before-clear-')));
+  await testNewOffers({ panel, apiBase, out, check, owned, navigations, setMode: value => { mode = value; } });
   await panel.click('[data-tab="home"]');
   await panel.waitForSelector('#tab-home .metrics');
   await panel.evaluate(() => { window.scrollTo(0, 0); document.querySelector('#toast').className = 'toast'; });

@@ -56,6 +56,7 @@
       value: short(r.value),
       note: r.note || '',
       source: r.source || '',
+      needsAdaptation: !!r.needsAdaptation,
     };
   }
 

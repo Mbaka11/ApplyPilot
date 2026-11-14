@@ -9,7 +9,8 @@ import { renderShell, setUiLanguage, switchTab } from './views/shell.mjs';
 import { analyze, activateApplication, applyJob, cvInspector, openJob, refreshPage, renderApp, schedulePageRefresh, selectCv } from './views/application.mjs';
 import { copyLetter, generateLetter, letterUrl, saveLetter } from './views/letter.mjs';
 import { captureMemory, exportFormDiagnostic, fillPage, markSubmitted, prepareAndAttachDocuments, stopFill } from './views/fill.mjs';
-import { changeStatus, deleteApplication } from './views/tracker.mjs';
+import { changeStatus, deleteApplication, setJournalView } from './views/tracker.mjs';
+import { clearUsage } from './views/settings.mjs';
 import { forgetMemory, reloadProfile, saveProfile, saveServer } from './views/profile.mjs';
 import { searchPanel } from './views/search.mjs';
 import { renderHome } from './views/home.mjs';
@@ -43,6 +44,9 @@ const ACTIONS = {
   submitted: () => markSubmitted(),
   exportCsv: () => chrome.tabs.create({ url: `${S.server}/journal.csv` }),
   saveServer: () => saveServer(),
+  showNewOffers: () => { searchPanel.showNew(); switchTab('search'); },
+  rerunSearch: () => searchPanel.rerunLast(),
+  clearUsage: () => clearUsage(),
 };
 
 document.addEventListener('click', async (e) => {
@@ -51,6 +55,7 @@ document.addEventListener('click', async (e) => {
   t.closest('.more-menu')?.removeAttribute('open');
   try {
     if (t.dataset.tab) return switchTab(t.dataset.tab);
+    if (t.dataset.journalView) return await setJournalView(t.dataset.journalView);
     if (t.dataset.stepToggle) return toggleStep(t.dataset.stepToggle);
     if (t.dataset.info) return toggleInfo(t);
     if (t.dataset.seen) { await markSeen(t.dataset.seen); return renderApp(); }

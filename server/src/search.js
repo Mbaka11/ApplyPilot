@@ -165,8 +165,11 @@ export function addDiscoveries(items, run = {}) {
   write(state);
   const meta = readMeta(before);
   const scope = typeof run.scope === 'string' && /^[a-z_]{1,40}$/.test(run.scope) ? run.scope : (state.settings?.scope || '');
-  meta.lastRunAt = now();
-  meta.lastRun = { source: SOURCES.includes(run.source) ? run.source : incoming[0].sources[0], scope };
+  const source = SOURCES.includes(run.source) ? run.source : incoming[0].sources[0];
+  if (['google', 'linkedin-public'].includes(source)) { // a manual import is not a search: it must not replace the re-runnable last run
+    meta.lastRunAt = now();
+    meta.lastRun = { source, scope };
+  }
   writeJson(metaFile(), meta);
   return { added, updated, merged };
 }

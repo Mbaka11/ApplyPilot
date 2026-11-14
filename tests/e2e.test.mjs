@@ -14,6 +14,7 @@ import { testFormDiagnostic } from './form-diagnostic-e2e.mjs';
 import { testSuccessFactors } from './successfactors-e2e.mjs';
 import { testDocumentPreparation } from './document-preparation-e2e.mjs';
 import { testCvTailor } from './cv-tailor-e2e.mjs';
+import { testInsights } from './insights-e2e.mjs';
 import { openStep, openFillOptions, fitScreenshot } from './panel-steps.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -538,6 +539,7 @@ async function main() {
     await panel.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('PDF updated'), { timeout: 30000 });
     const edited = (await fetch(`${apiBase}/applications/${englishApp.id}`).then(r => r.json())).application.letter;
     check('manual PDF edits retain attribution and are marked as subsequent edits', edited.editedAfterGeneration && JSON.stringify(edited.generation) === JSON.stringify(generated.generation));
+    await testInsights({ panel, apiBase, out: OUT, check });
     const beforeLeave = JSON.stringify((await fetch(`${apiBase}/applications`).then(r => r.json())).applications);
     await openStep(panel, 'offer');
     await panel.click('[data-action="newApp"]');
