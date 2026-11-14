@@ -1,6 +1,6 @@
 {
   "name": "applypilot-server",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "ApplyPilot local server: discovery, experimental public LinkedIn, profiles, pi letter provenance, PDFs and application tracking.",
   "type": "module",

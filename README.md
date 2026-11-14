@@ -1,17 +1,17 @@
 # ApplyPilot
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://github.com/Mbaka11/ApplyPilot/releases/latest)
 ![Chrome extension](https://img.shields.io/badge/Chrome-Manifest_V3-green)
 ![Interface](https://img.shields.io/badge/interface-English_%2F_Fran%C3%A7ais-purple)
 
-> **Local 0.8.0 update — not published yet.** Adds a Claude Code CLI provider (pi stays optional), a redesigned side panel with an application stepper, Settings and dark mode, plus the unpublished 0.7.0 work: selected-CV inspection, an opt-in local form diagnostic and partial SuccessFactors automation, including an explicit CV/cover-letter preparation and attachment action. The latest public release is [0.6.0](https://github.com/Mbaka11/ApplyPilot/releases/tag/v0.6.0).
+> **0.9.0 — insights.** New-offer markers and one-click "Run again" for your last search, tracker statistics, a local AI usage log, and remembered answers adapted to each posting. See the [changelog](CHANGELOG.md) and [what is logged and how statistics work](docs/insights.md). It builds on the 0.8.0 work (Claude Code CLI provider with pi optional, application stepper, Settings and dark mode) and the 0.7.0 work (selected-CV inspection, opt-in local form diagnostic, partial SuccessFactors automation); these changes are not published as a release yet. The latest public release is [0.6.0](https://github.com/Mbaka11/ApplyPilot/releases/tag/v0.6.0).
 
 > **LinkedIn integration is experimental.** Its public surface returned 200 during an initial probe, then 429 during connector validation. It is **not a reliable or officially supported integration**. Version 0.6.0 includes the bounded connector with these limitations, not a claim of production readiness. See the [investigation and verification notes](docs/prototype.md).
 
 **Apply to internships faster, without typing the same information again.** ApplyPilot pairs a Chrome side panel with a small local Node.js server:
 
 - 🏠 **Contextual home** — discovery, current-page actions, tracking counts and explicit resumption; no forced return to the last application.
-- 🔍 **Internship discovery** — job-link classification, platform badges and separate provenance filters. Bounded Google collection, an experimental public LinkedIn connector, and manual imports share a catalog independent of applications.
+- 🔍 **Internship discovery** — job-link classification, platform badges and separate provenance filters. Bounded Google collection, an experimental public LinkedIn connector, and manual imports share a catalog independent of applications. Offers found since your last visit are marked **New**, and **Run again** repeats your last search in one click.
 - 📄 **Tailored cover letters** — Claude drafts (or pi, if you choose it) editable, one-page PDFs using the posting and your CV source. See the requested model/effort before generation and the model reported afterward; old letters are not assigned invented metadata.
 - ✍️ **Form autofill** — Workday is the priority: contact details, addresses, phone numbers, experience, education, dates, eligibility questions, languages and websites. Generic forms, including Greenhouse- and Lever-style pages, are also supported. [SuccessFactors support is partial](docs/successfactors.md): ARIA controls, question matching and a guarded document-upload workflow. Repeated education/language sections remain manual.
 - 📎 **Attachments** — select an appropriate French, English or specialized CV; attach it, your cover letter and your configured transcript when relevant.
@@ -20,7 +20,9 @@
 - 🧩 **Local form diagnostic** — explicitly download a bounded structure-only JSON report to investigate unrecognized controls. No field values, attachments, raw labels/IDs, full URLs, account data or automatic upload. [Scope and instructions](docs/form-diagnostic.md).
 - 🧠 **Open questions** — generate suggested answers without inventing missing profile facts. AI answers always require review.
 - 🗂️ **Application tracker** — status, dates, selected CV and cover letter, plus CSV export.
-- 🔁 **Answer memory** — reuse answers to recurring questions on future applications.
+- 📊 **Statistics** — funnel, response rate and median response delay, by platform and by CV. Rates stay hidden below 5 submitted applications. [How they are computed](docs/insights.md).
+- 🧮 **AI usage** — a local, counters-only log of every AI call (task, model, duration, tokens and cost when reported) with a Settings summary. No prompts, answers or company names. Can be disabled or cleared.
+- 🔁 **Answer memory** — reuse answers to recurring questions on future applications. Long remembered answers are adapted to the current posting and always flagged for review.
 - ⚙️ **Profile editor** — update contact details, availability and eligibility answers, with private backups and conflict protection.
 - 🔎 **Posting checklist** — identify transcripts, credited internships, GPA thresholds, language requirements, on-site work, checks, pay and deadlines.
 - 🌐 **English / Français interface** — switch at any time in **Settings** (header gear). The preference is remembered; it does not change posting, CV, answer or cover-letter languages.
@@ -29,7 +31,7 @@
 
 > ApplyPilot **never clicks Submit**. It fills, highlights what needs review, and leaves submission to you.
 
-<p align="center"><img src="docs/prototype/home.png" width="320" alt="ApplyPilot 0.6.0 home with explicit application resumption"> &nbsp; <img src="docs/prototype/search.png" width="320" alt="Synthetic LinkedIn posting cards with separate platform and discovery filters"></p>
+<p align="center"><img src="docs/prototype/home-new-offers.png" width="240" alt="Home with a new-offers counter, the last search date with a Run again button, and tracking counts"> &nbsp; <img src="docs/prototype/tracker-stats.png" width="240" alt="Tracker statistics: funnel bars, response rate, median response time and per-platform and per-CV tables with n shown for small samples"> &nbsp; <img src="docs/prototype/settings-usage.png" width="240" alt="Settings with the AI usage card: counters for 24 hours, 7 days and 30 days, by task and by model, and a Clear usage history button"></p>
 
 *Screenshots use fictional candidates, employers and postings. They are not evidence of a real application or submission.*
 
@@ -87,7 +89,7 @@ If `ANTHROPIC_API_KEY` is set in the environment that starts the server, the Cla
 2. Stop the local server, run `npm ci` inside `server/` to refresh locked dependencies, then restart it. Version 0.6.0 adds the HTML parser dependency; the startup scripts only install dependencies automatically on the first run.
 3. In `chrome://extensions`, click **↻ Reload** on ApplyPilot’s card. **Do not remove and reimport it.**
 4. Close and reopen the ApplyPilot panel. Check the **version beside its name**.
-5. Click **Fill this page**. Updated scripts are reinjected into the existing tab without navigating or reloading Workday.
+5. Open the form step and click **Fill this page** in the bottom bar. Updated scripts are reinjected into the existing tab without navigating or reloading Workday.
 
 Leave **Overwrite existing fields** unchecked. **Do not press F5 on a form with unsaved entries.** If the server version differs from the extension, its connection badge asks you to restart it.
 
@@ -101,28 +103,30 @@ Open **Search**, review the internship keywords, AI/software/data/consulting dom
 - **Stop search** works from every panel tab. Keep the panel open while searching; closing it also stops the run. Completed catalog batches remain saved, and the search tab is left open for inspection.
 - **LinkedIn · prototype** requests anonymous public HTML through the local server and displays parsed cards in the panel. It is undocumented, blocked in the latest live test, and subject to LinkedIn's automation restrictions. No cookies, accounts, browser attachment, redirects or retries are used. Manual browsing/import remains available separately.
 - The default catalog view shows **identified job links** rather than listing pages. Known aggregator listings are skipped during Google collection; old listing/unknown entries remain accessible without deletion.
+- New offers (first seen since your last visit to Search) carry a **New** badge. Home shows how many there are; click the counter to open Search on them, or pick **New since my last visit** in the **State** filter. Leaving the Search tab marks them as seen. On first launch the existing catalog is not marked as new.
+- **Run again** (Home) repeats your last Google or public LinkedIn search with the same source and area. It is one bounded run, started by your click, never in the background; manual imports do not replace it.
 - Filter by **Location** (Montréal, Toronto, Canada anywhere, United States, remote or unknown), inferred from each listing's location, title and snippet; listings can match several groups.
 - Filter **Platform** separately from **Discovery method**: a Google-found LinkedIn URL is not evidence of direct LinkedIn collection.
 - Save, hide, restore, filter or delete catalog entries without creating applications. To apply, explicitly open the employer posting and use **Analyze this posting**.
 - **Sort by** relevance or publication date (newest/oldest first). Publication dates are mainly available for public LinkedIn results; undated offers stay at the bottom in both date orders, without substituting discovery dates.
 - Ranking is a simple keyword score, not an eligibility or vacancy check. Google can block collection or change its markup; there is no bypass and no exhaustive-results guarantee.
 
-Search does not invoke the AI provider or send your CV/contact details to a model. Google queries go through a dedicated browser tab; experimental LinkedIn queries go directly from the server. See the [search workflow, limits, privacy and API contract](docs/search.md).
+Search does not invoke the AI provider or send your CV/contact details to a model. Google queries go through a dedicated browser tab; experimental LinkedIn queries go directly from the server. See the [search workflow, limits, privacy and API contract](docs/search.md) and, for how "new" is defined, [docs/insights.md](docs/insights.md).
 
 <details><summary>Search preview (fictional fixtures, not evidence of live LinkedIn success)</summary><img src="docs/prototype/search.png" width="360" alt="Experimental discovery UI with synthetic postings"></details>
 
 ### Prepare an application
 
 1. Start from **Home**. Analyze the current posting or explicitly resume a recent application. The **Application** tab is a stepper (Posting, Documents, Autofill, Submission); one step is open at a time and the sticky bottom bar offers the main action. The selected application remains active through form steps; reopening the panel does not resume it automatically. **Leave this application** returns home without changing its tracker status. The recommended CV is preselected (★).
-2. **Generate cover letter**; allow roughly 20–60 seconds. Review the draft and warnings, edit it in the panel, then click **Update PDF**. You can choose French or English independently of the interface.
-3. Click **Apply / sign in**, then **Fill this page** on each step:
+2. In **Documents**, check the CV to attach and **Generate cover letter** (the bottom bar offers it when no letter exists yet); allow roughly 20–60 seconds. Review the draft and warnings, edit it in the panel, then click **Update PDF**. You can choose French or English independently of the interface.
+3. Once the letter is ready and no form is open, the bottom bar offers **Apply / sign in**, which opens the employer's application page. When the page contains a form, the bar switches to **Fill this page** (**Fill again** afterwards); run it on each step:
    - 🟩 **Green:** filled from your profile.
-   - 🟧 **Orange:** review needed, including eligibility answers, AI suggestions and manual consent checks.
+   - 🟧 **Orange:** review needed, including eligibility answers, AI suggestions, remembered answers and manual consent checks.
    - 🟥 **Red:** missing information or an unsupported control. Complete it yourself or update your profile.
 
    Click a result to jump to its field.
-4. Review the page, go to the next step and run autofill again. **Submit on the employer’s website yourself.** Only after receiving confirmation, click **I have submitted ✓**. This button only updates the tracker and asks for confirmation; it does not send a form.
-5. Track applications in **Tracker** and export CSV. The server also updates `data/candidatures.csv`.
+4. Review the page, go to the next step and run autofill again. **Submit on the employer’s website yourself.** Only after receiving confirmation, open the **Submission** step and click **I have submitted ✓**. This button only updates the tracker and asks for confirmation; it does not send a form.
+5. Track applications in **Tracker** (list or **Statistics**) and export CSV. The server also updates `data/candidatures.csv`.
 
 An incorrect submission mark can be reversed by selecting **In progress** in the tracker; the erroneous submission date is cleared.
 
@@ -132,7 +136,7 @@ An incorrect submission mark can be reversed by selecting **In progress** in the
 
 ### Inspect the selected CV
 
-Under **Application → CV to attach**, use **Preview CV** to open the current source PDF in a new tab without reloading your form. **Show in folder** selects that original file in Windows Explorer or macOS Finder; on Linux it opens the containing folder. **File and location** shows the exact path with **Copy path** and **Refresh file**, plus the filename, size and modification time.
+In the **Documents** step of **Application**, the **CV to attach** card offers **Preview CV**, which opens the current source PDF in a new tab without reloading your form. **Show in folder** selects that original file in Windows Explorer or macOS Finder; on Linux it opens the containing folder. **File and location** shows the exact path with **Copy path** and **Refresh file**, plus the filename, size and modification time.
 
 Each action rechecks the configured CV ID. Selection changes must save successfully before the actions become available; a missing CV is not silently replaced with another variant. No `file://` permission or arbitrary-path opening is added. The explicit native action requires the extension origin and confirmation and uses no command shell.
 
@@ -146,9 +150,21 @@ Click **Stop** in the bottom action bar while autofill or AI answers are running
 
 Changing tabs, navigating, or changing Workday steps cancels the previous run. Late answers cannot be written into a different step. Waiting for AI answers also stops after 90 seconds; retry or disable **Let the AI answer remaining questions** to continue manually.
 
+### Tracker statistics
+
+In **Tracker**, switch from **List** to **Statistics** for the funnel (identified offers, applications created, submitted, with a response), interview/offer/rejection counts, the response rate, a median response delay and tables by platform and by CV. A rate is only shown from **5 submitted applications**; below that you see "n = x". These are descriptive counts, not advice about what works. The response delay only uses status changes made since 0.9.0. Details and limits: [docs/insights.md](docs/insights.md).
+
+<details><summary>Statistics preview (fictional data)</summary><img src="docs/prototype/tracker-stats.png" width="360" alt="Funnel bars, response rate, median response time and per-platform and per-CV tables for fictional applications"></details>
+
+### AI usage
+
+**Settings → AI usage** summarizes your AI calls over 24 hours, 7 days and 30 days: generations, successes/failures, tokens, total time and cost, by task and by model. It is a local counters-only log in `data/usage/usage.jsonl` (180 days, 5 MB maximum): no prompts, answers, company names or profile data. Tokens and cost appear when the Claude CLI reports them; pi calls show durations only. With a subscription the cost is an estimate, since nothing is billed per call; with `ANTHROPIC_API_KEY` set the Claude CLI bills the API. Use **Clear usage history** to erase it, or set `usage.enabled: false` in `config.yaml` and restart the server to stop logging. See [docs/insights.md](docs/insights.md).
+
+<details><summary>AI usage preview (fictional data)</summary><img src="docs/prototype/settings-usage.png" width="360" alt="Settings page with the AI usage card showing counters by period, task and model"></details>
+
 ### Interface language
 
-Open **Settings** (gear icon in the header) and choose **English** or **Français**; **Profile** is the neighbouring icon. Settings also shows the active AI provider, model and effort read-only from the server; edit `config.yaml` to change them. On first use, a French browser defaults to French; other browser languages default to English. Your explicit choice is saved locally.
+Open **Settings** (gear icon in the header) and choose **English** or **Français**; **Profile** is the neighbouring icon. Settings also shows the active AI provider, model and effort read-only from the server, plus the AI usage card; edit `config.yaml` to change them. On first use, a French browser defaults to French; other browser languages default to English. Your explicit choice is saved locally.
 
 Switching language changes system labels, dates, status displays, confirmations and feedback. It preserves unsaved profile fields, server URL edits, letter drafts and instructions, search filters and manual-import drafts. It does **not** translate or save your profile values, employer content, remembered answers, CVs or cover letters. Existing tracker status identifiers remain compatible.
 
@@ -157,8 +173,8 @@ Switching language changes system labels, dates, status displays, confirmations 
 - **Autofill with Resume:** attach your CV, let Workday parse it, then use ApplyPilot to complete the remaining fields.
 - **Apply Manually:** ApplyPilot can add experience and education entries when those sections are empty.
 - Workday accounts are generally **employer-specific**. An account on one employer’s portal does not unlock another portal.
-- **Apply / sign in** reuses a valid browser session. An already open form is activated without reloading it.
-- On a sign-in page, autofill supplies **email only**. Use Chrome’s password manager for passwords; account creation, CAPTCHA, email verification and MFA remain manual. ApplyPilot does not store passwords.
+- **Apply / sign in** (bottom bar) reuses a valid browser session. An already open form is activated without reloading it.
+- On a sign-in page, **Fill this page** supplies **email only**. Use Chrome’s password manager for passwords; account creation, CAPTCHA, email verification and MFA remain manual. ApplyPilot does not store passwords.
 
 **Focus-dependent fields:** when the side panel has focus, Workday may display a value without committing it. ApplyPilot synchronizes focus/blur events so the website can record the field. Background-page fixtures cover this behavior.
 
@@ -168,7 +184,13 @@ Switching language changes system labels, dates, status displays, confirmations 
 
 ### Answer memory
 
-Answers not covered by your profile are remembered when you click Next, or **Remember my answers**. Manage them in **Profile**. Sensitive controls such as passwords and signatures are excluded.
+Answers not covered by your profile are remembered when you click Next, or **Remember my answers**. Manage them in **Profile**. Sensitive controls such as passwords and signatures are excluded. Short text areas (up to 300 characters) are remembered too.
+
+Long remembered answers (over 60 characters, text areas, or answers that name the company they were written for) are treated as adaptable, because they rarely fit another posting unchanged:
+
+- **AI on:** the model rewrites the answer for the current posting using only facts from your profile and CV, replaces the old company, and respects the field's maximum length. The result is always orange (review needed), shows an **Adapted from {company}** chip and has a confidence capped at 0.8. If the old company is still mentioned, the note says so; if the answer no longer applies, the field keeps the remembered value.
+- **AI off:** the remembered value is filled as-is with an orange *Remembered answer: review it* note and an **adapt** chip.
+- A field you edited yourself before the adaptation arrives is never overwritten. Adapting sends the remembered text to your AI provider, like any other AI answer. See [docs/insights.md](docs/insights.md).
 
 ### Profile editing
 
@@ -187,6 +209,7 @@ Editing a profile does not update existing CV PDFs or cover letters. Keep study 
 - **AI is not offline:** relevant posting, profile, CV and letter information is sent to the provider configured in `llm.provider` (Claude Code or pi) to generate text. Its privacy policy and usage limits apply.
 - Search terms go to Google or the experimental public LinkedIn endpoint when you start that source. The connector omits credentials; manual browser navigation can use the current website session. No LinkedIn content scripts, credential export or account automation are used.
 - The discovery catalog lives in `data/search/discovery.json`, independently of applications. Its first schema-2 mutation saves an exact private schema-1 backup; read-only views do not migrate it. Imported text stays local unless explicitly used in another workflow.
+- The AI usage log (`data/usage/`) and the new-offer markers (`data/search/meta.json`) stay local and are excluded from Git. The usage log holds counters only, never content.
 - Passwords, CAPTCHA, signatures and consent controls are never completed automatically.
 - Unknown eligibility answers are not guessed. AI output is always marked for review.
 - ApplyPilot never submits applications. A tracker status alone is not proof of an employer submission.
@@ -206,6 +229,7 @@ Sites vary. Unusual widgets can remain incomplete and need manual input. Workday
 | `letter.paper`, `letter.showHeader` | Letter/A4 paper and contact header |
 | `letter.fileNameFr` / `fileNameEn` | PDF filenames, e.g. `{first}_{last}_Cover_Letter_{company}.pdf` |
 | `fill.attachLetterWithCv` | Also attach the letter in a CV field when it accepts multiple files |
+| `usage.enabled` | Local AI usage log (default `true`); set `false` and restart the server to stop logging |
 | `fill.cvFileName` | Neutral upload name, default `{first}_{last}_CV.pdf`; does not expose a targeted variant’s filename |
 
 See [`config.example.yaml`](config.example.yaml) and [`profile.example.yaml`](profile.example.yaml). Values and matching rules can be bilingual regardless of the selected interface language.

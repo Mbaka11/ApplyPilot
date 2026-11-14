@@ -135,7 +135,11 @@ creates an application or submits a form.
 
 | Method | Route | Behavior |
 |---|---|---|
-| GET | `/search` | Settings, ranked jobs, derived link quality/platform/provenance, optional application association |
+| GET | `/search` | Settings, ranked jobs, derived link quality/platform/provenance, optional application association, and `meta` (see below) |
+| POST | `/search/seen` | No body; sets `meta.lastSeenAt` to now and returns the refreshed `/search` view. The panel calls it when you leave the Search tab |
+| GET | `/stats` | Tracker statistics computed from applications and the catalog; no AI, no personal data in the reply ([how](insights.md)) |
+| GET | `/usage` | Local AI usage summary; `?days=` (1–3650, default 30). Counters only ([what is logged](insights.md)) |
+| DELETE | `/usage` | Erase the usage log |
 | PUT | `/search/settings` | Validate and persist editable search settings |
 | POST | `/search/results` | `{items}`; 1–100 Google results, source forced to `google` |
 | POST | `/search/linkedin` | `{settings,index,acknowledgeExperimental:true}`; one public page, validated import, evidence and fresh catalog |
@@ -143,6 +147,10 @@ creates an application or submits a form.
 | PATCH | `/search/jobs/:id` | `{status:"new"\|"saved"\|"hidden"}` only |
 | POST | `/search/clear` | `{confirm:true,ids:[all IDs in the loaded catalog, regardless of filters]}`; clear every discovery after validating the complete catalog ID snapshot, with a private backup |
 | DELETE | `/search/jobs/:id` | Delete a discovery only |
+
+`meta` in the `/search` reply: `{lastRunAt, lastRun:{source,scope}|null, lastSeenAt, newCount}`. `lastRun` is the last Google or public LinkedIn run (a manual import never replaces it) and lets the panel offer **Run again** with the same source and scope. `newCount` is the number of jobs still in status `new` whose `firstSeenAt` is later than `lastSeenAt`. The markers are stored in `data/search/meta.json`, apart from `discovery.json`; a missing or corrupt file simply restarts them (the existing catalog is then not counted as new). The "since my last visit" filter is applied in the panel with `lastSeenAt`.
+
+`GET /stats` returns `{minSample, funnel:{identified,created,submitted,responded}, responses:{interview,offer,rejection}, rate, byPlatform[], byCv[], medianResponseDays, delaySamples}`; rates are `null` below `minSample` (5). `GET /usage` returns `{enabled, days, since, totals, billing, byDay[], byTask[], byModel[]}` with counts, tokens, milliseconds and cost only. Both routes keep the localhost Host/Origin protection and never contact a remote service.
 
 Settings: `{keywords,categories,scope,term,maxPages}`. Categories are `ai`, `dev`,
 `data`, `consulting`; scopes are `montreal_plus` (default: Montréal + remote Canada first, then one
