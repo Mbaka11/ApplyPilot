@@ -89,7 +89,7 @@ function logUsage(opts, started, runs, ok, attempts) {
     const sum = key => runs.reduce((t, r) => addTokens(t, r?.usage?.[key]), null);
     recordUsage({ at: new Date().toISOString(), task, provider, model: gen.model || opts.model || requested.requestedModel, effort: opts.effort || opts.thinking || requested.requestedThinking,
       ms: ok ? runs.reduce((t, r) => t + (r?.ms || 0), 0) : Date.now() - started, attempts, ok,
-      costUsd: runs.reduce((t, r) => addCost(t, r?.generation?.costUsd), undefined) ?? null, inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'), billing: billingMode() });
+      costUsd: runs.reduce((t, r) => addCost(t, r?.generation?.costUsd), undefined) ?? null, inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'), billing: billingMode(process.env, provider) });
   } catch { /* the log must never break a generation */ }
 }
 
@@ -98,7 +98,11 @@ export async function askJson(prompt, opts = {}) {
   const started = Date.now(), runs = [];
   const call = async text => {
     try { const r = await runProvider(text, opts); runs.push(r); return r; }
-    catch (e) { if (e?.name !== 'AbortError') logUsage(opts, started, runs, false, runs.length + 1); throw e; } // a cancellation is not a failure
+    catch (e) {
+      // A cancellation is not a failure, but what an earlier completed attempt already spent is recorded; a cancellation before any completed attempt stays unlogged.
+      if (e?.name !== 'AbortError' || runs.length) logUsage(opts, started, runs, false, runs.length + 1);
+      throw e;
+    }
   };
   const first = await call(prompt);
   try {

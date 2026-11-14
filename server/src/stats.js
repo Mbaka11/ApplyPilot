@@ -7,8 +7,9 @@ const SUBMITTED_STATUS = new Set(['soumise', ...RESPONSE]);
 const DAY = 86400000;
 
 const isoTime = v => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
-const submittedOf = app => isoTime(app.submittedAt) !== null || SUBMITTED_STATUS.has(app.status);
-const respondedOf = app => RESPONSE.has(app.status);
+const submittedOf = app => isoTime(app.submittedAt) !== null || SUBMITTED_STATUS.has(app.status) || respondedOf(app);
+// A dated first response counts even if the application was later abandoned; otherwise the current status decides.
+const respondedOf = app => isoTime(app.respondedAt) !== null || isoTime(app.firstResponseAt) !== null || RESPONSE.has(app.status);
 const key = (v, fallback) => (typeof v === 'string' && v.trim() ? v.trim().toLowerCase().slice(0, 80) : fallback);
 const rate = (responded, submitted) => (submitted < MIN_SAMPLE ? null : Math.round((responded / submitted) * 1000) / 1000);
 
@@ -25,11 +26,11 @@ function breakdown(map) {
 }
 
 /** The first-response date is optional: only an explicit `respondedAt` (or `firstResponseAt`) counts. */
-export function computeStats(applications = [], catalogJobs = []) {
+export function computeStats(applications = [], catalogJobs = [], identifiedCount = null) {
   const apps = (Array.isArray(applications) ? applications : []).filter(a => a && typeof a === 'object');
   const jobs = Array.isArray(catalogJobs) ? catalogJobs : [];
-  let identified = 0;
-  for (const job of jobs) { try { if (catalogMeta(job || {}).kind === 'job') identified++; } catch { /* odd legacy row */ } }
+  let identified = Number.isInteger(identifiedCount) && identifiedCount >= 0 ? identifiedCount : 0;
+  if (identifiedCount === null) for (const job of jobs) { try { if (catalogMeta(job || {}).kind === 'job') identified++; } catch { /* odd legacy row */ } }
   const byPlatform = new Map(), byCv = new Map(), delays = [];
   let submitted = 0, responded = 0;
   const bump = (map, k, isSub, isResp) => {

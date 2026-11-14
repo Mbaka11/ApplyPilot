@@ -103,8 +103,25 @@ export function getSearch(profile = {}, applications = []) {
   const jobs = state.jobs.map(job => ({ ...job, ...catalogMeta(job), ...rankOffer(job, settings), ...(job.keys.map(key => appKeys.get(key)).find(Boolean) || {}) }));
   jobs.sort((a, b) => b.score - a.score || b.lastSeenAt.localeCompare(a.lastSeenAt));
   const meta = readMeta();
-  meta.newCount = state.jobs.filter(job => job.status === 'new' && job.firstSeenAt > meta.lastSeenAt).length;
+  // Same population as the "new since last visit" view, which forces kind `job`.
+  meta.newCount = jobs.filter(job => job.kind === 'job' && job.status === 'new' && job.firstSeenAt > meta.lastSeenAt).length;
   return { settings, jobs, meta };
+}
+/** Read-only count of identified offers (kind `job`) in the raw validated catalog: no ranking, no meta.json write. */
+export function countIdentifiedJobs() {
+  let n = 0;
+  for (const job of read().jobs) { try { if (catalogMeta(job).kind === 'job') n++; } catch { /* odd legacy row */ } }
+  return n;
+}
+/** Records a completed run (even one that found nothing) so the panel can re-run it and remember the scope. */
+export function recordSearchRun(run = {}) {
+  if (!run || typeof run !== 'object' || Array.isArray(run) || !['google', 'linkedin-public'].includes(run.source)) fail(400, 'Source de recherche invalide.');
+  if (run.scope !== undefined && (typeof run.scope !== 'string' || !/^[a-z_]{1,40}$/.test(run.scope))) fail(400, 'Zone de recherche invalide.');
+  const meta = readMeta();
+  meta.lastRunAt = now();
+  meta.lastRun = { source: run.source, scope: run.scope || '' };
+  writeJson(metaFile(), meta);
+  return meta;
 }
 export function saveSearchSettings(input, profile = {}) {
   const state = read();

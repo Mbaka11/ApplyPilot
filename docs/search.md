@@ -136,6 +136,7 @@ creates an application or submits a form.
 | Method | Route | Behavior |
 |---|---|---|
 | GET | `/search` | Settings, ranked jobs, derived link quality/platform/provenance, optional application association, and `meta` (see below) |
+| POST | `/search/run` | `{source:"google"\|"linkedin-public", scope?}`; records a completed run, even with no result, as `meta.lastRun`/`lastRunAt`. The panel calls it when a run ends |
 | POST | `/search/seen` | No body; sets `meta.lastSeenAt` to now and returns the refreshed `/search` view. The panel calls it when you leave the Search tab |
 | GET | `/stats` | Tracker statistics computed from applications and the catalog; no AI, no personal data in the reply ([how](insights.md)) |
 | GET | `/usage` | Local AI usage summary; `?days=` (1–3650, default 30). Counters only ([what is logged](insights.md)) |
@@ -148,7 +149,7 @@ creates an application or submits a form.
 | POST | `/search/clear` | `{confirm:true,ids:[all IDs in the loaded catalog, regardless of filters]}`; clear every discovery after validating the complete catalog ID snapshot, with a private backup |
 | DELETE | `/search/jobs/:id` | Delete a discovery only |
 
-`meta` in the `/search` reply: `{lastRunAt, lastRun:{source,scope}|null, lastSeenAt, newCount}`. `lastRun` is the last Google or public LinkedIn run (a manual import never replaces it) and lets the panel offer **Run again** with the same source and scope. `newCount` is the number of jobs still in status `new` whose `firstSeenAt` is later than `lastSeenAt`. The markers are stored in `data/search/meta.json`, apart from `discovery.json`; a missing or corrupt file simply restarts them (the existing catalog is then not counted as new). The "since my last visit" filter is applied in the panel with `lastSeenAt`.
+`meta` in the `/search` reply: `{lastRunAt, lastRun:{source,scope}|null, lastSeenAt, newCount}`. `lastRun` is the last Google or public LinkedIn run (a manual import never replaces it) and lets the panel offer **Run again** with the same source and scope. `newCount` is the number of jobs of kind `job` (individual job links) still in status `new` whose `firstSeenAt` is later than `lastSeenAt`, the same population as the "since my last visit" view. The markers are stored in `data/search/meta.json`, apart from `discovery.json`; a missing or corrupt file simply restarts them (the existing catalog is then not counted as new). The "since my last visit" filter is applied in the panel with `lastSeenAt`.
 
 `GET /stats` returns `{minSample, funnel:{identified,created,submitted,responded}, responses:{interview,offer,rejection}, rate, byPlatform[], byCv[], medianResponseDays, delaySamples}`; rates are `null` below `minSample` (5). `GET /usage` returns `{enabled, days, since, totals, billing, byDay[], byTask[], byModel[]}` with counts, tokens, milliseconds and cost only. Both routes keep the localhost Host/Origin protection and never contact a remote service.
 

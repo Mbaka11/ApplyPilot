@@ -128,6 +128,14 @@ export async function testInsights({ panel, apiBase, out, check, englishAppId })
   await tap('[data-tab="home"]'); await tap('[data-tab="settings"]');
   await panel.waitForFunction(() => document.querySelector('#usageCard')?.textContent.includes('Estimate (subscription'));
   check('subscription billing labels the cost as an estimate', !(await panel.$eval('#usageCard', e => e.textContent)).includes('Billed cost'));
+  await stub(summary({ api: 0, subscription: 0, unknown: 3 }, true));
+  await tap('[data-tab="home"]'); await tap('[data-tab="settings"]');
+  await panel.waitForFunction(() => document.querySelector('#usageCard')?.textContent.includes('billing unknown'));
+  check('pi (unknown billing) never shows "Billed cost"', !(await panel.$eval('#usageCard', e => e.textContent)).includes('Billed cost'));
+  await stub(summary({ api: 2, subscription: 0, unknown: 1 }, true));
+  await tap('[data-tab="home"]'); await tap('[data-tab="settings"]');
+  await panel.waitForFunction(() => document.querySelector('#usageCard')?.textContent.includes('Estimate'));
+  check('mixed api + pi calls are not labelled as billed', !(await panel.$eval('#usageCard', e => e.textContent)).includes('Billed cost'));
   await panel.evaluate(() => { globalThis.fetch = globalThis.__fetch0; });
   await tap('[data-tab="home"]'); await tap('[data-tab="settings"]');
   await panel.waitForSelector('#usageCard [data-action="clearUsage"]:not([disabled])');

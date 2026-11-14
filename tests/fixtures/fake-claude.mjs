@@ -50,7 +50,11 @@ if (settings.mode === 'error') {
   process.exitCode = 1;
 } else if (settings.mode === 'json' || (settings.mode === 'retry' && input.includes('\n\nIMPORTANT :'))) {
   output({ answers: {} });
-} else if (settings.mode === 'invalid' || settings.mode === 'retry') {
+} else if (settings.mode === 'retry-hang' && input.includes('\n\nIMPORTANT :')) {
+  // Second attempt never ends: lets a test cancel the retry after the first attempt already spent tokens.
+  if (settings.marker) fs.writeFileSync(settings.marker, 'hang');
+  setInterval(() => {}, 1000);
+} else if (settings.mode === 'invalid' || settings.mode === 'retry' || settings.mode === 'retry-hang') {
   output('not JSON');
 } else if (settings.mode === 'fenced') {
   output('```json\n{"answers":{}}\n```');

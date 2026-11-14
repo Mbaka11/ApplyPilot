@@ -20,7 +20,7 @@ import { clearUsage, usageView } from './usage.js';
 import { askJson, cancelAll, resolvePi, generationSettings, llmHealth, providerSummary } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
-import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, markSearchSeen, updateDiscovery, deleteDiscovery, clearDiscoveries } from './search.js';
+import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, markSearchSeen, recordSearchRun, countIdentifiedJobs, updateDiscovery, deleteDiscovery, clearDiscoveries } from './search.js';
 import { searchLinkedInPage } from './linkedin.js';
 import { computeStats } from './stats.js';
 import { detectRequirements, transcriptPath } from './requirements.js';
@@ -335,10 +335,11 @@ route('POST', '/search/results', ({ body }) => {
   return { ...discoveryView(), ...counts };
 });
 route('POST', '/search/seen', () => { markSearchSeen(); return discoveryView(); });
+route('POST', '/search/run', ({ body }) => { recordSearchRun(body); return discoveryView(); });
 route('GET', '/stats', () => {
-  let jobs = [];
-  try { jobs = getSearch({}, []).jobs; } catch { /* unreadable catalog: stats still work from applications */ }
-  return computeStats(listApplications(), jobs);
+  let identified = 0;
+  try { identified = countIdentifiedJobs(); } catch { /* unreadable catalog: stats still work from applications */ }
+  return computeStats(listApplications(), [], identified);
 });
 route('POST', '/search/import', ({ body }) => ({ ...importDiscoveries(body), ...discoveryView() }));
 route('POST', '/search/linkedin', async ({ body, res }) => {

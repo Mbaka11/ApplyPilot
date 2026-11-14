@@ -30,7 +30,9 @@ function usageBlock() {
   if (!S.health || !u) return '';
   const cols = [['24 h', u.day], ['7 jours', u.week], ['30 jours', u.month]];
   const month = u.month;
-  const apiBilled = month.billing.api > 0 && month.billing.subscription === 0;
+  const b = month.billing || {};
+  const apiBilled = b.api > 0 && !b.subscription && !b.unknown; // "billed" only when every counted call went through the API
+  const unknownBilling = !apiBilled && !b.api && !b.subscription && b.unknown > 0; // pi: nobody knows who bills
   const withCost = cols.some(([, s]) => s.totals.costUsd > 0);
   const tok = (t) => (t.count && !t.inputTokens && !t.outputTokens ? '—' : `${fmtTokens(t.inputTokens)} + ${fmtTokens(t.outputTokens)}`);
   const row = (label, fn) => `<tr><th scope="row">${esc(tr(label))}</th>${cols.map(([, s]) => `<td>${esc(fn(s.totals))}</td>`).join('')}</tr>`;
@@ -43,7 +45,7 @@ function usageBlock() {
       ${row('Réussies / échouées', (t) => `${t.ok} / ${t.failed}`)}
       ${row('Jetons (entrée + sortie)', tok)}
       ${row('Durée totale', (t) => fmtDuration(t.ms))}
-      ${withCost ? row(apiBilled ? 'Coût facturé' : 'Estimation (abonnement : rien n’est facturé à l’appel)', (t) => fmtCost(t.costUsd)) : ''}
+      ${withCost ? row(apiBilled ? 'Coût facturé' : unknownBilling ? 'Estimation (facturation inconnue pour ce fournisseur)' : 'Estimation (abonnement : rien n’est facturé à l’appel)', (t) => fmtCost(t.costUsd)) : ''}
     </tbody></table>
     <div class="small"><b>${tr('Par tâche')}</b> <span class="muted">(${tr('30 jours')})</span></div>${list(month.byTask, (i) => tr(EFFORT_LABEL[i.task] || i.task))}
     <div class="small"><b>${tr('Par modèle')}</b> <span class="muted">(${tr('30 jours')})</span></div>${list(month.byModel, (i) => modelLabel(i.model) || i.model)}`}

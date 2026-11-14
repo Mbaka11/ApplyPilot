@@ -153,6 +153,9 @@ export function createSearchPanel({ element, onRunChange = () => {}, api, tr, es
         onPage: async items => { current(); const saved = await api('/search/results', { method: 'POST', body: { items }, signal: run.controller.signal }); current(); adopt(saved); renderCatalog(); },
       });
       current(); state.lastTabId = result.tabId || null;
+      // Même une recherche sans résultat est une exécution terminée : on retient sa source et sa zone pour le « relancer ».
+      try { const ran = await api('/search/run', { method: 'POST', body: { source, scope: settings.scope }, signal: run.controller.signal }); current(); adopt(ran); }
+      catch (error) { if (error.name === 'AbortError') throw error; /* sans gravité : seul le raccourci « relancer » manque */ }
       feedback(result.found ? 'Recherche terminée. Vérifie les offres dans le catalogue.' : 'Recherche terminée sans lien importable. Modifie les filtres ou importe des liens.');
     } catch (error) {
       if (state.run !== run) return;

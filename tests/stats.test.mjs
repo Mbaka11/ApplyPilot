@@ -42,3 +42,20 @@ test('median delay only from real dates and output carries no personal data', ()
   assert.equal(s.medianResponseDays, 4); assert.equal(s.delaySamples, 3);
   assert.equal(JSON.stringify(s).includes('SecretCo'), false);
 });
+
+test('a response survives a later abandonment; a status-only response still counts; submitted stays consistent', () => {
+  const abandoned = app('abandonnée', 'indeed', 'c', { submittedAt: '2026-01-01T00:00:00.000Z', respondedAt: '2026-01-05T00:00:00.000Z' });
+  const viaFirst = app('abandonnée', 'indeed', 'c', { submittedAt: '2026-01-01T00:00:00.000Z', firstResponseAt: '2026-01-03T00:00:00.000Z' });
+  const noResponse = app('abandonnée', 'indeed', 'c', { submittedAt: '2026-01-01T00:00:00.000Z' });
+  const neverSubmitted = app('abandonnée', 'indeed', 'c');
+  const badDate = app('soumise', 'indeed', 'c', { respondedAt: 'not a date' });
+  const s = computeStats([abandoned, viaFirst, noResponse, neverSubmitted, badDate, app('offre', 'indeed', 'c')], []);
+  assert.equal(s.funnel.submitted, 5); // abandoned-with-submittedAt still counts; never-submitted does not
+  assert.equal(s.funnel.responded, 3);
+  assert.equal(s.rate, 0.6);
+  assert.equal(s.delaySamples, 2);
+});
+test('an identified count can be supplied without the catalog rows', () => {
+  assert.equal(computeStats([], [], 7).funnel.identified, 7);
+  assert.equal(computeStats([], [job(1)], null).funnel.identified, 1);
+});

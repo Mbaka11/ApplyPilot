@@ -152,6 +152,13 @@ async function main() {
     const searchResult = await api('POST', '/search/results', { items: [{ url: SAMPLE_JOB.url, title: SAMPLE_JOB.title, snippet: 'Software internship in Montréal', query: 'software intern' }] });
     check('recherche : ajout Google sans candidature', searchResult.status === 200 && searchResult.data.added === 1 && (await api('GET', '/applications')).data.applications.length === 0);
     const discoveryId = searchResult.data.jobs?.[0]?.id;
+    const noResultRun = await api('POST', '/search/run', { source: 'linkedin-public', scope: 'canada' });
+    check('recherche : une exécution sans résultat est mémorisée (source + zone)', noResultRun.status === 200 && noResultRun.data.meta.lastRun?.source === 'linkedin-public' && noResultRun.data.meta.lastRun.scope === 'canada' && noResultRun.data.jobs.length === 1);
+    const badRun = await api('POST', '/search/run', { source: 'manual' });
+    const foreignRun = await api('POST', '/search/run', { source: 'google', scope: 'canada' }, { origin: 'https://evil.example.com' });
+    check('recherche : /search/run refuse une source manuelle et une origine étrangère', badRun.status === 400 && foreignRun.status === 403);
+    const statsView = await api('GET', '/stats');
+    check('stats : le compteur identifié ne dépend pas du classement', statsView.status === 200 && statsView.data.funnel.identified === 1);
     const savedDiscovery = await api('PATCH', `/search/jobs/${discoveryId}`, { status: 'saved' });
     check('recherche : sauvegarder une offre ne soumet rien', savedDiscovery.status === 200 && savedDiscovery.data.jobs[0].status === 'saved');
     const manual = await api('POST', '/search/import', { links: 'https://www.linkedin.com/jobs/view/1234567890', details: { title: 'Titre manuel', employerUrl: SAMPLE_JOB.url } });

@@ -26,6 +26,20 @@
     return ctx;
   }
 
+  // Valeurs posées par nos soins (mémoire ou IA) : une réponse restée telle quelle n'est pas « la tienne » (cf. captureAnswers).
+  const flat = (v) => (Array.isArray(v) ? v.join(' ') : String(v ?? '')).replace(/\s+/g, ' ').trim();
+  /** Même texte à la normalisation près (espaces) ; un préfixe tronqué compte si le champ a une limite de longueur. */
+  function sameText(a, b, max) {
+    const x = flat(a);
+    const y = flat(b);
+    if (x === y) return true;
+    if (!(max > 0)) return false;
+    const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+    return short.length > 0 && short.length <= max && long.startsWith(short);
+  }
+  AP.filledByUs = AP.filledByUs || new Map();
+  const freshById = () => new Map(AP.scanFields().map((f) => [f.id, f]));
+
   const CHOICE = new Set(['select', 'radio', 'dropdown', 'prompt', 'combobox', 'checkboxes']);
   const hasRuntime = () => {
     try {
@@ -168,11 +182,14 @@
     }
 
     // Réponses mémorisées remplies par nos soins et à adapter à l'offre (si l'IA est activée).
+    // On relit la valeur réellement présente dans la page (limite de longueur, nettoyage…), pas celle qu'on a voulu écrire.
     const memoryFields = [];
     AP.memoryFilled = new Map();
+    const fresh = freshById();
     for (const [id, r] of results) {
+      if (['ok', 'check'].includes(r.status) && ['mémoire', 'ia'].includes(r.source) && fresh.has(id)) AP.filledByUs.set(id, fresh.get(id).value);
       if (!r.needsAdaptation || r.status !== 'check' || !r.d.el.isConnected) continue;
-      AP.memoryFilled.set(id, r.previous.value);
+      AP.memoryFilled.set(id, fresh.get(id)?.value ?? r.previous.value);
       memoryFields.push({ ...AP.serializeField(r.d), previous: r.previous });
     }
 
@@ -200,6 +217,7 @@
     AP.computePageFlags(ctx, fields);
     const byId = new Map(fields.map((f) => [f.id, f]));
     const out = [];
+    const written = []; // champs réellement écrits ici : on relira leur valeur à la fin
     for (const [id, a] of Object.entries(payload.answers || {})) {
       ctx.checkpoint();
       const d = byId.get(id);
@@ -226,15 +244,26 @@
       }
       ctx.checkpoint();
       const r = { d, ...res, source: 'ia' };
+      if (['ok', 'check'].includes(res.status)) written.push(id);
       paint(d, r.status, r.note, ctx.options.uiLanguage || ctx.lang);
       out.push(serializeResult(id, r));
     }
     // Réponses mémorisées adaptées : remplacent la valeur mémorisée seulement si le champ n'a pas été modifié depuis.
+    const adapted = [];
     for (const [id, a] of Object.entries(payload.memoryAnswers || {})) {
       ctx.checkpoint();
       const d = byId.get(id);
-      if (!d || typeof a?.value !== 'string' || !a.value.trim() || !AP.memoryFilled?.has(id)) continue;
-      if (String(d.value ?? '') !== String(AP.memoryFilled.get(id))) continue;
+      if (!d || !AP.memoryFilled?.has(id)) continue;
+      if (!sameText(d.value, AP.memoryFilled.get(id), d.maxLength)) continue; // modifié depuis : jamais écrasé
+      if (typeof a?.value !== 'string' || !a.value.trim()) {
+        // L'IA juge que la réponse ne s'applique plus : on garde la valeur mais on affiche son avis (orange).
+        const why = String(a?.note ?? '').trim();
+        const r = { d, status: 'check', value: d.value, source: 'ia', note: why ? `L’IA estime que cette réponse ne s’applique plus : ${why}` : 'L’IA estime que cette réponse ne s’applique plus' };
+        ctx.checkpoint();
+        paint(d, r.status, r.note, ctx.options.uiLanguage || ctx.lang);
+        out.push(serializeResult(id, r));
+        continue;
+      }
       let res;
       try {
         res = await AP.fillField(d, { value: a.value, confidence: Math.min(0.8, a.confidence ?? 0.8), source: 'ia' }, ctx);
@@ -245,11 +274,16 @@
       if (res.status === 'ok') res.status = 'check';
       if (res.status !== 'check') continue;
       res.note = a.note || res.note || '';
-      AP.memoryFilled.set(id, d.value);
+      adapted.push(id);
       ctx.checkpoint();
       const r = { d, ...res, source: 'ia' };
       paint(d, r.status, r.note, ctx.options.uiLanguage || ctx.lang);
       out.push(serializeResult(id, r));
+    }
+    if (written.length || adapted.length) {
+      const fresh = freshById(); // valeur réellement présente après le remplissage
+      for (const id of written) if (fresh.has(id)) AP.filledByUs.set(id, fresh.get(id).value);
+      for (const id of adapted) if (fresh.has(id)) { AP.memoryFilled.set(id, fresh.get(id).value); AP.filledByUs.set(id, fresh.get(id).value); }
     }
     AP.releaseFocus();
     return { results: out };
@@ -278,6 +312,7 @@
       if (ctx.platform === 'successfactors' && d.kind === 'combobox') continue;
       if (d.isEmpty || !d.label || d.label.length < 3) continue;
       const v = d.value;
+      if (AP.filledByUs.has(d.id) && sameText(v, AP.filledByUs.get(d.id), d.maxLength)) continue; // posée par mémoire/IA et non modifiée : pas la tienne
       if (typeof v === 'string' && v.length > (d.kind === 'textarea' ? 300 : 120)) continue; // le serveur refuse > 300
       const r = AP.resolve(d, ctx);
       if (r && AP.NO_MEMORY.has(r.ruleId)) continue;

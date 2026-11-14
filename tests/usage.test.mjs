@@ -10,7 +10,7 @@ fs.mkdirSync(OUT, { recursive: true });
 process.env.APPLYPILOT_DATA_DIR = OUT;
 delete process.env.ANTHROPIC_API_KEY;
 const { askJson } = await import('../server/src/llm.js');
-const { recordUsage, usageSummary, clearUsage, rotateUsage, usageView, USAGE_FILE } = await import('../server/src/usage.js');
+const { recordUsage, usageSummary, clearUsage, rotateUsage, usageView, billingMode, USAGE_FILE, MAX_BYTES } = await import('../server/src/usage.js');
 
 let failures = 0;
 function check(label, condition) {
@@ -55,6 +55,24 @@ try {
   await askJson('{}', { cfg: ccfg(), signal: ac.signal }).catch(() => {});
   check('a cancelled request is not logged', lines().length === 5);
 
+  console.log('Cancellation of the retry and billing by provider');
+  const marker = path.join(OUT, 'hang.marker');
+  const rc = new AbortController();
+  const hung = askJson(JSON.stringify({ mode: 'retry-hang', marker }), { cfg: ccfg(), task: 'answers', signal: rc.signal }).catch(e => e);
+  for (let i = 0; i < 300 && !fs.existsSync(marker); i++) await new Promise(r => setTimeout(r, 50));
+  rc.abort();
+  check('cancelling the retry rejects as AbortError', (await hung).name === 'AbortError');
+  rows = lines();
+  check('the first attempt already spent is logged ok:false with its tokens and cost', rows.length === 6 && rows.at(-1).ok === false && rows.at(-1).attempts === 2 && rows.at(-1).inputTokens === 1180 && rows.at(-1).outputTokens === 52 && rows.at(-1).costUsd === 0.005236);
+  check('billingMode: api only for claude with a key; pi is unknown', billingMode({ ANTHROPIC_API_KEY: 'k' }, 'claude') === 'api' && billingMode({}, 'claude') === 'subscription' && billingMode({ ANTHROPIC_API_KEY: 'k' }, 'pi') === 'unknown' && billingMode({}, 'pi') === 'unknown');
+  process.env.ANTHROPIC_API_KEY = 'sk-test-not-real';
+  await askJson('{"mode":"json"}', { cfg: { llm: { provider: 'pi', command: path.join(ROOT, 'tests', 'fixtures', 'fake-pi.mjs'), model: 'fixture/requested' } }, task: 'answers' });
+  delete process.env.ANTHROPIC_API_KEY;
+  rows = lines();
+  check('a pi call is logged billing unknown even when ANTHROPIC_API_KEY is set', rows.length === 7 && rows.at(-1).provider === 'pi' && rows.at(-1).billing === 'unknown');
+  check('summary counts unknown billing separately', usageSummary({ days: 30 }).billing.unknown === 1);
+  fs.writeFileSync(USAGE_FILE, lines().slice(0, 5).map(r => JSON.stringify(r)).join('\n') + '\n'); // back to the 5 rows later checks expect
+
   const raw = fs.readFileSync(USAGE_FILE, 'utf8');
   check('no prompt, answer, error text or reasoning in the file', !raw.includes(CANARY) && !raw.includes('Not logged in') && !raw.includes('PRIVATE_REASONING') && !raw.includes('Nordic') && !raw.includes('session'));
 
@@ -88,6 +106,20 @@ try {
   const after = lines();
   check('size cap drops the oldest lines first', r2.dropped > 0 && fs.statSync(USAGE_FILE).size <= 10_000 && Date.parse(after[0].at) < Date.parse(after.at(-1).at));
   check('the newest entry survives the size cap', Math.abs(Date.parse(after.at(-1).at) - (now - (100 - 199 * 0.4) * DAY)) < 5);
+
+  console.log('Rotation watermark');
+  const nowW = Date.now();
+  const rowW = i => JSON.stringify({ at: new Date(nowW - 1000 + i).toISOString(), task: 'letter', provider: 'claude', ok: true, billing: 'api', pad: 'x'.repeat(1000) });
+  const seed = []; let sz = 0;
+  for (let i = 0; sz < MAX_BYTES * 0.9 + 4000; i++) { const l = rowW(i); seed.push(l); sz += l.length + 1; }
+  fs.writeFileSync(USAGE_FILE, `${seed.join('\n')}\n`);
+  recordUsage(mk(0)); // crosses 90 %: rotates once, down to the low watermark
+  const afterRotate = fs.statSync(USAGE_FILE).size;
+  check('rotation trims to about 80 % of the cap, not to the cap', afterRotate <= MAX_BYTES * 0.8 && afterRotate > MAX_BYTES * 0.75);
+  const m1 = fs.statSync(USAGE_FILE).mtimeMs, sizeBefore = afterRotate;
+  recordUsage(mk(0)); recordUsage(mk(0));
+  check('following appends do not rewrite the file (plain appends only)', fs.statSync(USAGE_FILE).size > sizeBefore && lines().length >= 3 && fs.readdirSync(path.dirname(USAGE_FILE)).every(n => !n.endsWith('.tmp')) && fs.statSync(USAGE_FILE).mtimeMs >= m1);
+  check('the newest entries survive and the log stays under the cap', Math.abs(Date.parse(lines().at(-1).at) - Date.now()) < 5000 && fs.statSync(USAGE_FILE).size < MAX_BYTES);
 
   console.log('Corruption');
   fs.writeFileSync(USAGE_FILE, `${JSON.stringify(mk(1))}\n{"at": broken\nnot json at all\n${JSON.stringify(mk(2))}\n{"at":"2026-01-01T00:00:00.000Z","task":"x"`);

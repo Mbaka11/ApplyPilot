@@ -324,8 +324,11 @@ async function main() {
     const r3b = await run(page, 'fillValues', { ...PAYLOAD, answers: { [lic.id]: { value: 'Yes', confidence: 0.6, note: 'test' }, [why.id]: { value: 'Because I love data.', confidence: 0.8 } } });
     check('réponses IA appliquées', (await q('q5')) === 'Yes' && (await val(page, '[data-automation-id="formField-q6"] textarea')) === 'Because I love data.');
     check('réponses IA marquées « à vérifier »', r3b.results.every((x) => x.status === 'check'));
+    const capUntouched0 = await run(page, 'capture');
+    check('mémoire : des réponses IA non retouchées ne sont pas retenues comme les tiennes', capUntouched0.items.length === 0, JSON.stringify(capUntouched0.items));
+    await page.$eval('[data-automation-id="formField-q6"] textarea', (e) => { e.value = 'Because I love data and teaching.'; });
     const cap = await run(page, 'capture');
-    check('mémoire : la nouvelle question et la réponse longue relue sont retenues, rien d’autre', cap.items.length === 2 && cap.items.some((i) => /driver/i.test(i.label) && i.value === 'Yes') && cap.items.some((i) => i.kind === 'textarea' && i.value === 'Because I love data.'), JSON.stringify(cap.items));
+    check('mémoire : seule la réponse retouchée par l’utilisateur est retenue (la liste remplie par l’IA reste exclue)', cap.items.length === 1 && cap.items.some((i) => i.kind === 'textarea' && i.value === 'Because I love data and teaching.'), JSON.stringify(cap.items));
     await page.screenshot({ path: path.join(OUT, 'workday-questions.png'), fullPage: true });
 
     console.log('Formulaire générique (type Greenhouse)');
@@ -366,7 +369,9 @@ async function main() {
     check('mémoire non adaptable (choix court) : inchangée, jamais envoyée à l’IA', (await page.$eval('#hear', (e) => e.selectedOptions[0].text)) === 'Referral' && rMem.memoryFields.length === 1 && rMem.results.find((x) => /hear/i.test(x.label))?.status === 'ok');
     const mid = mf.id;
     const nullRes = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [mid]: { value: null, confidence: 0, note: 'Ne s’applique plus' } } });
-    check('réponse null : la valeur mémorisée reste', (await val(page, '#why')) === OLD && nullRes.results.length === 0);
+    check('réponse null : la valeur mémorisée reste, avec l’avis de l’IA en orange', (await val(page, '#why')) === OLD && nullRes.results.length === 1 && nullRes.results[0].status === 'check' && nullRes.results[0].note === 'L’IA estime que cette réponse ne s’applique plus : Ne s’applique plus' && nullRes.results[0].value.startsWith('I want to join Acme'), JSON.stringify(nullRes.results));
+    const nullNoNote = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [mid]: { value: null, confidence: 0 } } });
+    check('réponse null sans note : avis seul, valeur conservée', nullNoNote.results[0]?.note === 'L’IA estime que cette réponse ne s’applique plus' && (await val(page, '#why')) === OLD);
     await page.$eval('#why', (e) => { e.maxLength = 40; });
     const adapted = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [mid]: { value: 'I want to join Nordic Analytics because I enjoy applied machine learning.', confidence: 0.8, note: 'Adaptée de Acme Robotics' } } });
     const nv = await val(page, '#why');
@@ -376,6 +381,39 @@ async function main() {
     await page.$eval('#why', (e) => { e.value = 'My own edit'; });
     const edited = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [mid]: { value: 'Replacement', confidence: 0.8, note: 'x' } } });
     check('champ modifié par l’utilisateur : jamais écrasé', (await val(page, '#why')) === 'My own edit' && edited.results.length === 0);
+
+    console.log('Mémoire : réponses posées par nos soins');
+    await load(page, 'generic-form.html');
+    await run(page, 'fill', memPayload);
+    const capUntouched = await run(page, 'capture');
+    check('réponse mémorisée non modifiée : pas recapturée comme la tienne', !capUntouched.items.some((i) => /Why do you want/.test(i.label)), JSON.stringify(capUntouched.items.map((i) => i.label)));
+    await page.$eval('#why', (e) => { e.value = e.value.replace('Acme Robotics', 'Nordic Analytics'); });
+    const capEdited = await run(page, 'capture');
+    check('réponse mémorisée modifiée par l’utilisateur : capturée', capEdited.items.some((i) => /Why do you want/.test(i.label) && i.value.includes('Nordic Analytics')));
+    await load(page, 'generic-form.html');
+    const rAi = await run(page, 'fill', PAYLOAD);
+    const whyU = rAi.unresolved.find((u) => /Why do you want/.test(u.label));
+    await run(page, 'fillValues', { ...PAYLOAD, answers: { [whyU.id]: { value: 'Short AI answer about the team.', confidence: 0.7, note: 'IA' } }, memoryAnswers: {} });
+    check('réponse IA courte : posée dans le champ', (await val(page, '#why')) === 'Short AI answer about the team.');
+    const capAi = await run(page, 'capture');
+    check('réponse IA non modifiée : jamais mémorisée comme la tienne', !capAi.items.some((i) => /Why do you want/.test(i.label)), JSON.stringify(capAi.items.map((i) => i.label)));
+    await page.$eval('#why', (e) => { e.value = 'Short AI answer, then my own words.'; });
+    check('réponse IA retouchée : capturée', (await run(page, 'capture')).items.some((i) => /Why do you want/.test(i.label)));
+
+    console.log('Mémoire : adaptation malgré une normalisation côté page');
+    await load(page, 'generic-form.html');
+    await page.$eval('#why', (e) => { e.maxLength = 40; });
+    const rTrunc = await run(page, 'fill', memPayload);
+    const tid = rTrunc.memoryFields.find((m) => /Why do you want/.test(m.label))?.id;
+    const truncated = await val(page, '#why');
+    check('la page a tronqué la valeur mémorisée à maxLength', truncated.length <= 40 && truncated.length > 0 && OLD.startsWith(truncated.trim()), truncated);
+    const adaptedTrunc = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [tid]: { value: 'I want to join Nordic Analytics.', confidence: 0.8, note: 'Adaptée de Acme Robotics' } } });
+    check('adaptation appliquée même si la valeur relue diffère de la mémoire', (await val(page, '#why')) === 'I want to join Nordic Analytics.' && adaptedTrunc.results[0]?.status === 'check');
+    const secondTry = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [tid]: { value: 'Second rewrite', confidence: 0.8, note: 'x' } } });
+    check('la valeur de référence est celle réellement écrite : une 2e adaptation sur le même texte reste possible, un texte retouché non', (await val(page, '#why')) === 'Second rewrite' && secondTry.results.length === 1);
+    await page.$eval('#why', (e) => { e.value = 'Edited by me'; });
+    const thirdTry = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [tid]: { value: 'Third rewrite', confidence: 0.8, note: 'x' } } });
+    check('texte retouché après adaptation : jamais écrasé', (await val(page, '#why')) === 'Edited by me' && thirdTry.results.length === 0);
   } finally {
     await browser.close();
   }

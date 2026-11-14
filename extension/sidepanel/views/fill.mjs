@@ -274,8 +274,8 @@ const RES_GROUPS = [
 ];
 /** Pastille d'une réponse mémorisée : « à adapter » (valeur reprise telle quelle) ou « Adaptée de {entreprise} » (réécrite par l'IA). */
 function adaptChip(r) {
-  const adapted = /^Adaptée de /.test(r.note || '') ? r.note.split(' : ')[0] : '';
-  if (adapted) return ` <span class="badge warn adapt-chip">${esc(tr(adapted))}</span>`;
+  const company = /^Adaptée de (.+?)(?: : ancienne entreprise encore mentionnée)?$/.exec(r.note || '')?.[1];
+  if (company) return ` <span class="badge warn adapt-chip">${esc(tr('Adaptée de {company}', { company }))}</span>`;
   return r.needsAdaptation ? ` <span class="badge warn adapt-chip">${esc(tr('à adapter'))}</span>` : '';
 }
 const groupOf = (r) => (r.status === 'fail' || r.status === 'unresolved' ? 'todo' : r.status === 'skip' ? 'check' : r.status);

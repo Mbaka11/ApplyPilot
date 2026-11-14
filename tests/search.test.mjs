@@ -10,10 +10,10 @@ const OUT = path.join(ROOT, 'tests/output/search-unit');
 fs.mkdirSync(OUT, { recursive: true });
 const DATA = fs.mkdtempSync(path.join(OUT, 'catalog-'));
 process.env.APPLYPILOT_DATA_DIR = DATA;
-const { getSearch, markSearchSeen, addDiscoveries, importDiscoveries, saveSearchSettings, updateDiscovery, deleteDiscovery, clearDiscoveries } = await import('../server/src/search.js');
+const { countIdentifiedJobs, recordSearchRun, getSearch, markSearchSeen, addDiscoveries, importDiscoveries, saveSearchSettings, updateDiscovery, deleteDiscovery, clearDiscoveries } = await import('../server/src/search.js');
 const file = path.join(DATA, 'search/discovery.json');
 const defaults = searchDefaults({ availability: { termEn: 'Winter 2027' } });
-const employer = 'https://careers.example.org/jobs/software-intern';
+const employer = 'https://careers.example.org/job-details/software-intern';
 const linked = 'https://www.linkedin.com/jobs/view/1234567890';
 const sample = { url: employer, title: 'Software intern — Winter 2027', location: 'Montréal', snippet: 'Hybrid software development internship.', source: 'google', query: 'software intern' };
 const reset = () => fs.rmSync(path.join(DATA, 'search'), { recursive: true, force: true });
@@ -284,4 +284,31 @@ test('meta writes are atomic (no temp file left, valid JSON after many runs)', (
   for (let i = 0; i < 20; i++) { addDiscoveries([{ ...sample, url: `${employer}-${i}` }]); markSearchSeen(); }
   assert.ok(JSON.parse(fs.readFileSync(metaFile, 'utf8')).lastSeenAt);
   assert.deepEqual(fs.readdirSync(path.dirname(metaFile)).filter(n => n.endsWith('.tmp')), []);
+});
+
+test('newCount only counts offers of kind job (the view forces kind job), not listings or unknown links', async () => {
+  reset(); saveSearchSettings(defaults); getSearch(); await sleep(5);
+  addDiscoveries([sample, { ...sample, url: 'https://careers.example.org/careers/' }, { ...sample, url: 'https://careers.example.org/some/page' }], { source: 'google' });
+  const view = getSearch();
+  assert.deepEqual(view.jobs.map(j => j.kind).sort(), ['job', 'listing', 'unknown']);
+  assert.equal(view.meta.newCount, 1);
+});
+test('countIdentifiedJobs is read-only (no meta.json write) and counts kind job only', () => {
+  reset(); saveSearchSettings(defaults);
+  addDiscoveries([sample, { ...sample, url: 'https://careers.example.org/careers/' }], { source: 'google' });
+  fs.rmSync(metaFile, { force: true });
+  assert.equal(countIdentifiedJobs(), 1);
+  assert.equal(fs.existsSync(metaFile), false);
+});
+test('recordSearchRun records an empty run and the scope; manual sources and bad scopes are refused', () => {
+  reset(); saveSearchSettings(defaults); getSearch();
+  assert.equal(getSearch().meta.lastRun, null);
+  const meta = recordSearchRun({ source: 'linkedin-public', scope: 'canada' });
+  assert.deepEqual(meta.lastRun, { source: 'linkedin-public', scope: 'canada' });
+  assert.ok(getSearch().meta.lastRunAt);
+  recordSearchRun({ source: 'google', scope: 'quebec_only' });
+  assert.deepEqual(getSearch().meta.lastRun, { source: 'google', scope: 'quebec_only' });
+  assert.throws(() => recordSearchRun({ source: 'manual' }), { status: 400 });
+  assert.throws(() => recordSearchRun({ source: 'google', scope: '../x' }), { status: 400 });
+  assert.throws(() => recordSearchRun(null), { status: 400 });
 });
