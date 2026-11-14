@@ -382,6 +382,9 @@ route('PATCH', '/applications/:id', ({ params, body }) => {
     app.status = body.status;
     if (body.status === 'en cours') app.submittedAt = null; // annuler un marquage erroné, pas une soumission au site
     if (body.status === 'soumise' && !app.submittedAt) app.submittedAt = new Date().toISOString();
+    // Première réponse de l'employeur : sert au délai médian des statistiques. Retirée si on revient avant la réponse.
+    if (['entrevue', 'offre', 'refusée'].includes(body.status)) app.respondedAt ??= new Date().toISOString();
+    else if (['en cours', 'soumise'].includes(body.status)) app.respondedAt = null;
   }
   if (body.job && typeof body.job === 'object') {
     for (const k of ['title', 'company', 'location', 'language', 'url']) {

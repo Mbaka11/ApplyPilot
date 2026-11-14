@@ -342,6 +342,13 @@ Posting End Date 2026-10-14`,
     check('statut « soumise »', patch.data.application?.status === 'soumise' && !!patch.data.application?.submittedAt);
     const resumed = await api('PATCH', `/applications/${app.id}`, { status: 'en cours' });
     check('marquage annulé : en cours sans fausse date de soumission', resumed.data.application?.status === 'en cours' && resumed.data.application?.submittedAt === null);
+    await api('PATCH', `/applications/${app.id}`, { status: 'soumise' });
+    const answered = await api('PATCH', `/applications/${app.id}`, { status: 'entrevue' });
+    const firstAnswer = answered.data.application?.respondedAt;
+    const later = await api('PATCH', `/applications/${app.id}`, { status: 'offre' });
+    check('date de première réponse posée une fois', !!firstAnswer && later.data.application?.respondedAt === firstAnswer);
+    const back = await api('PATCH', `/applications/${app.id}`, { status: 'en cours' });
+    check('retour en cours : réponse et soumission effacées', back.data.application?.respondedAt === null && back.data.application?.submittedAt === null);
     const csv = await api('GET', '/journal.csv');
     check('journal CSV', csv.status === 200 && csv.data.toString('utf8').includes('Nordique Analytique'));
 
