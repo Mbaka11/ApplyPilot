@@ -413,6 +413,30 @@ Posting End Date 2026-10-14`,
       const g = viaClaude.data.letter?.generation;
       check('letter generation through claude records provider, observed model and effort', viaClaude.status === 200 && g?.providerKind === 'claude-cli' && g.provider === 'anthropic' && g.model === 'claude-sonnet-5-5' && g.requestedModel === 'claude-sonnet-5-5' && g.requestedThinking === 'high' && g.attempts === 1 && typeof g.costUsd === 'number');
       check('claude letter has a PDF and no reasoning leaked', !!viaClaude.data.letter?.fileName && !JSON.stringify(viaClaude.data).includes('PRIVATE_REASONING_CANARY'));
+
+      console.log('Mémoire adaptée — /answers memoryAnswers (fake-claude)');
+      const prevText = 'I enjoy applied research and shipped ML pipelines, which is why Acme Robotics appeals to me.';
+      const adapt = await api('POST', '/answers', {
+        applicationId: app.id,
+        fields: [{ id: 'f1', label: 'Anything else?', kind: 'textarea' }],
+        memoryAnswers: [
+          { id: 'm1', label: 'Why us?', kind: 'textarea', previous: { value: prevText, company: 'Acme Robotics' } },
+          { id: 'm2', label: 'NULLME question', kind: 'textarea', previous: { value: prevText, company: 'Acme Robotics' } },
+          { id: 'm3', label: 'LONG answer', kind: 'textarea', maxLength: 120, previous: { value: prevText, company: 'Acme Robotics' } },
+          { id: 'm4', label: 'STALE answer', kind: 'textarea', previous: { value: prevText, company: 'Acme Robotics' } },
+        ],
+      });
+      const M = adapt.data.memoryAnswers || {};
+      check('adapted answer swaps the old company for the new one', adapt.status === 200 && M.m1?.value.includes('Nordic Analytics') && !M.m1.value.includes('Acme Robotics'), JSON.stringify(M.m1));
+      check('adapted confidence capped at 0.8, note names the source, flagged adapted', M.m1.confidence === 0.8 && M.m1.note === 'Adaptée de Acme Robotics' && M.m1.adapted === true);
+      check('value null kept null with the model note', M.m2?.value === null && /applique plus/.test(M.m2.note));
+      check('maxLength enforced server-side', M.m3?.value.length === 120);
+      check('old company still present is signalled', /ancienne entreprise/.test(M.m4?.note || ''));
+      check('server never accepts a value for an id that was not requested', !('ghost' in M) && !('ghost' in adapt.data.answers) && !('m1' in adapt.data.answers));
+      const memOnly = await api('POST', '/answers', { applicationId: app.id, fields: [], memoryAnswers: [{ id: 'm1', label: 'Why us?', kind: 'textarea', previous: { value: prevText, company: 'Acme Robotics' } }] });
+      check('memoryAnswers alone are enough to call the AI', memOnly.status === 200 && !!memOnly.data.memoryAnswers.m1?.value);
+      const badMem = await api('POST', '/answers', { fields: [], memoryAnswers: [{ id: 'z', label: 'x', previous: { value: '' } }] });
+      check('empty previous value is ignored without calling the AI', badMem.status === 200 && Object.keys(badMem.data.memoryAnswers).length === 0);
     } finally {
       fs.writeFileSync(TEST_CONFIG, piConfig);
     }

@@ -200,23 +200,25 @@ export async function fillPage() {
     const frames = await execFill(run, 'fill', payload);
     let results = frames.flatMap((f) => f.results || []);
     const unresolved = frames.flatMap((f) => f.unresolved || []);
+    const memoryFields = frames.flatMap((f) => f.memoryFields || []);
     const step = frames.find((f) => f.step)?.step || null;
     const info = frames.find((f) => f.info?.addedEntries)?.info || {};
     S.fill = { results, step, info, at: Date.now(), noCv: !files.cv };
-    if (S.prefs.useAi && unresolved.length) {
-      S.fillPhase = `L’IA répond à ${unresolved.length} question${unresolved.length > 1 ? 's' : ''}…`;
+    if (S.prefs.useAi && (unresolved.length || memoryFields.length)) {
+      const asked = unresolved.length + memoryFields.length;
+      S.fillPhase = `L’IA répond à ${asked} question${asked > 1 ? 's' : ''}…`;
       renderFill();
       try {
         run.answerTimer = setTimeout(() => { if (S.fillRun === run) stopFill({ timedOut: true }); }, 90_000);
-        const { answers } = await request('/answers', {
+        const { answers, memoryAnswers } = await request('/answers', {
           method: 'POST',
-          body: { applicationId: S.app?.id, cvId: S.app?.cvId, job: S.app ? undefined : job, fields: unresolved, uiLanguage: S.uiLanguage },
+          body: { applicationId: S.app?.id, cvId: S.app?.cvId, job: S.app ? undefined : job, fields: unresolved, memoryAnswers: memoryFields, uiLanguage: S.uiLanguage },
         });
         clearTimeout(run.answerTimer);
         assertFill(run);
         S.fillPhase = 'Application des réponses…';
         renderFill();
-        const filled = await execFill(run, 'fillValues', { ...payload, answers });
+        const filled = await execFill(run, 'fillValues', { ...payload, answers, memoryAnswers });
         const byId = new Map(filled.flatMap((f) => f.results || []).map((r) => [r.id, r]));
         results = results.map((r) => byId.get(r.id) || r);
       } catch (e) {

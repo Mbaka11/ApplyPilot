@@ -59,6 +59,7 @@ const PAYLOAD = {
   options: { addEntries: true, attachLetterWithCv: true },
 };
 
+const AP_KEY = (label) => label.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 let failures = 0;
 function check(name, cond, extra = '') {
   console.log(`${cond ? '  ✓' : '  ✗'} ${name}${extra !== '' ? ` — ${extra}` : ''}`);
@@ -324,7 +325,7 @@ async function main() {
     check('réponses IA appliquées', (await q('q5')) === 'Yes' && (await val(page, '[data-automation-id="formField-q6"] textarea')) === 'Because I love data.');
     check('réponses IA marquées « à vérifier »', r3b.results.every((x) => x.status === 'check'));
     const cap = await run(page, 'capture');
-    check('mémoire : seule la nouvelle question est retenue', cap.items.length === 1 && /driver/i.test(cap.items[0].label) && cap.items[0].value === 'Yes', JSON.stringify(cap.items));
+    check('mémoire : la nouvelle question et la réponse longue relue sont retenues, rien d’autre', cap.items.length === 2 && cap.items.some((i) => /driver/i.test(i.label) && i.value === 'Yes') && cap.items.some((i) => i.kind === 'textarea' && i.value === 'Because I love data.'), JSON.stringify(cap.items));
     await page.screenshot({ path: path.join(OUT, 'workday-questions.png'), fullPage: true });
 
     console.log('Formulaire générique (type Greenhouse)');
@@ -347,6 +348,34 @@ async function main() {
     check('« Pourquoi nous ? » laissé à l’IA', r4.unresolved.some((u) => /Why do you want/.test(u.label)));
     check('formulaire jamais soumis', !(await page.evaluate(() => window.submitted)));
     await page.screenshot({ path: path.join(OUT, 'generic-form.png'), fullPage: true });
+
+    console.log('Mémoire adaptée');
+    const WHY = 'Why do you want to join Nordique Analytique?';
+    const OLD = 'I want to join Acme Robotics because I enjoy applied machine learning and shipping models.';
+    const memPayload = { ...PAYLOAD, memory: { items: {
+      [AP_KEY(WHY)]: { label: WHY, value: OLD, kind: 'textarea', lastCompany: 'Acme Robotics', adaptable: true },
+      [AP_KEY('How did you hear about this job?')]: { label: 'How did you hear about this job?', value: 'Referral', kind: 'select', lastCompany: 'Acme Robotics', adaptable: false },
+    } } };
+    await load(page, 'generic-form.html');
+    const rMem = await run(page, 'fill', memPayload);
+    const whyRes = rMem.results.find((x) => /Why do you want/.test(x.label));
+    check('mémoire adaptable : valeur remplie même sans IA', (await val(page, '#why')) === OLD);
+    check('mémoire adaptable : orange avec la note nommant l’ancienne entreprise', whyRes?.status === 'check' && whyRes.note === 'Réponse mémorisée pour Acme Robotics : relis-la', JSON.stringify(whyRes));
+    const mf = rMem.memoryFields.find((m) => /Why do you want/.test(m.label));
+    check('mémoire adaptable : envoyée à l’IA avec previous, pas dans « non résolus »', mf?.previous?.company === 'Acme Robotics' && mf.previous.value === OLD && mf.kind === 'textarea' && !rMem.unresolved.some((u) => /Why do you want/.test(u.label)), JSON.stringify(mf));
+    check('mémoire non adaptable (choix court) : inchangée, jamais envoyée à l’IA', (await page.$eval('#hear', (e) => e.selectedOptions[0].text)) === 'Referral' && rMem.memoryFields.length === 1 && rMem.results.find((x) => /hear/i.test(x.label))?.status === 'ok');
+    const mid = mf.id;
+    const nullRes = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [mid]: { value: null, confidence: 0, note: 'Ne s’applique plus' } } });
+    check('réponse null : la valeur mémorisée reste', (await val(page, '#why')) === OLD && nullRes.results.length === 0);
+    await page.$eval('#why', (e) => { e.maxLength = 40; });
+    const adapted = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [mid]: { value: 'I want to join Nordic Analytics because I enjoy applied machine learning.', confidence: 0.8, note: 'Adaptée de Acme Robotics' } } });
+    const nv = await val(page, '#why');
+    check('réponse adaptée : remplace la valeur, tronquée à maxLength, à relire', nv.startsWith('I want to join Nordic Analytics') && nv.length <= 40 && !nv.includes('Acme') && adapted.results[0]?.status === 'check' && adapted.results[0].note === 'Adaptée de Acme Robotics', `${nv} | ${JSON.stringify(adapted.results)}`);
+    await load(page, 'generic-form.html');
+    await run(page, 'fill', memPayload);
+    await page.$eval('#why', (e) => { e.value = 'My own edit'; });
+    const edited = await run(page, 'fillValues', { ...memPayload, answers: {}, memoryAnswers: { [mid]: { value: 'Replacement', confidence: 0.8, note: 'x' } } });
+    check('champ modifié par l’utilisateur : jamais écrasé', (await val(page, '#why')) === 'My own edit' && edited.results.length === 0);
   } finally {
     await browser.close();
   }

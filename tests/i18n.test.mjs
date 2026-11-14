@@ -110,4 +110,12 @@ check('shared translation script is safe to reinject (no top-level lexical colli
     assert.equal(modelLabel('fixture/x'), 'fixture/x');
   });
 }
+check('adapted-memory notes are translated, company names left intact', () => {
+  assert.equal(translate('Réponse mémorisée pour Acme Robotics : relis-la', 'en'), 'Remembered answer for Acme Robotics: review it');
+  assert.equal(translate('Réponse mémorisée : relis-la', 'en'), 'Remembered answer: review it');
+  assert.equal(translate('Adaptée de Acme Robotics', 'en'), 'Adapted from Acme Robotics');
+  assert.equal(translate('Adaptée de la réponse mémorisée', 'en'), 'Adapted from the remembered answer');
+  assert.equal(translate('Adaptée de Acme : ancienne entreprise encore mentionnée', 'en'), 'Adapted from Acme: the old company is still mentioned');
+  assert.equal(translate('Adaptée de Acme', 'fr'), 'Adaptée de Acme');
+});
 console.log(`\n${checks} localization checks passed.`);

@@ -352,10 +352,29 @@
 
   const memoryKey = (label) => AP.norm(label).replace(/\s+/g, ' ').slice(0, 200);
 
+  /** Même règle que le serveur : texte long, champ texte long ou entreprise d'origine citée (anciens fichiers sans drapeau). */
+  function memoryAdaptable(m) {
+    if (typeof m.adaptable === 'boolean') return m.adaptable;
+    const text = Array.isArray(m.value) ? m.value.join(' ') : m.value;
+    if (typeof text !== 'string') return false;
+    if (text.length > 60 || m.kind === 'textarea') return true;
+    const co = AP.norm(m.lastCompany || '');
+    return co.length >= 2 && ` ${AP.norm(text)} `.includes(` ${co} `);
+  }
+
   function memoryLookup(d, c) {
-    if (!d.label || d.kind === 'file' || d.kind === 'textarea') return null;
+    if (!d.label || d.kind === 'file') return null;
     const m = c.memory[memoryKey(d.label)];
     if (!m || m.value === undefined || m.value === null || m.value === '') return null;
+    if (memoryAdaptable(m) && typeof m.value === 'string' && !['select', 'radio', 'dropdown', 'prompt', 'combobox', 'checkboxes', 'checkbox'].includes(d.kind)) {
+      const company = m.lastCompany || '';
+      return {
+        value: m.value, confidence: 0.85, source: 'mémoire', ruleId: 'memory', review: true,
+        needsAdaptation: true, previous: { value: m.value, company },
+        note: company ? `Réponse mémorisée pour ${company} : relis-la` : 'Réponse mémorisée : relis-la',
+      };
+    }
+    if (d.kind === 'textarea') return null;
     return { value: m.value, multi: Array.isArray(m.value), bool: typeof m.value === 'boolean' ? m.value : undefined, confidence: 0.85, source: 'mémoire', note: 'Réponse mémorisée', ruleId: 'memory' };
   }
 

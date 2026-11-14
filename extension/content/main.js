@@ -140,7 +140,7 @@
           res.note = res.note || r.note || '';
           acted++;
         }
-        results.set(d.id, { d, ...res, ruleId: r?.ruleId });
+        results.set(d.id, { d, ...res, ruleId: r?.ruleId, needsAdaptation: !!r?.needsAdaptation, previous: r?.previous });
       }
       AP.releaseFocus(); // dernier champ validé avant de rescanner (Workday enregistre au blur)
       if (!acted) break;
@@ -166,6 +166,15 @@
       unresolved.push(AP.serializeField(r.d));
     }
 
+    // Réponses mémorisées remplies par nos soins et à adapter à l'offre (si l'IA est activée).
+    const memoryFields = [];
+    AP.memoryFilled = new Map();
+    for (const [id, r] of results) {
+      if (!r.needsAdaptation || r.status !== 'check' || !r.d.el.isConnected) continue;
+      AP.memoryFilled.set(id, r.previous.value);
+      memoryFields.push({ ...AP.serializeField(r.d), previous: r.previous });
+    }
+
     const out = [];
     ctx.checkpoint();
     for (const [id, r] of results) {
@@ -179,6 +188,7 @@
       info,
       results: out,
       unresolved,
+      memoryFields: memoryFields.map((f) => ({ id: f.id, label: f.label, kind: f.kind, maxLength: f.maxLength, previous: f.previous })),
     };
   }
 
@@ -218,6 +228,28 @@
       paint(d, r.status, r.note, ctx.options.uiLanguage || ctx.lang);
       out.push(serializeResult(id, r));
     }
+    // Réponses mémorisées adaptées : remplacent la valeur mémorisée seulement si le champ n'a pas été modifié depuis.
+    for (const [id, a] of Object.entries(payload.memoryAnswers || {})) {
+      ctx.checkpoint();
+      const d = byId.get(id);
+      if (!d || typeof a?.value !== 'string' || !a.value.trim() || !AP.memoryFilled?.has(id)) continue;
+      if (String(d.value ?? '') !== String(AP.memoryFilled.get(id))) continue;
+      let res;
+      try {
+        res = await AP.fillField(d, { value: a.value, confidence: Math.min(0.8, a.confidence ?? 0.8), source: 'ia' }, ctx);
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        continue; // la valeur mémorisée reste en place, avec son avertissement
+      }
+      if (res.status === 'ok') res.status = 'check';
+      if (res.status !== 'check') continue;
+      res.note = a.note || res.note || '';
+      AP.memoryFilled.set(id, d.value);
+      ctx.checkpoint();
+      const r = { d, ...res, source: 'ia' };
+      paint(d, r.status, r.note, ctx.options.uiLanguage || ctx.lang);
+      out.push(serializeResult(id, r));
+    }
     AP.releaseFocus();
     return { results: out };
   }
@@ -240,12 +272,12 @@
     AP.computePageFlags(ctx, fields);
     const items = [];
     for (const d of fields) {
-      if (['file', 'textarea', 'manual-action'].includes(d.kind) || d.manualReason || d.inputType === 'password' || d.entryType) continue;
+      if (['file', 'manual-action'].includes(d.kind) || d.manualReason || d.inputType === 'password' || d.entryType) continue;
       // Editable SAP combobox text alone is not proof of a committed selection.
       if (ctx.platform === 'successfactors' && d.kind === 'combobox') continue;
       if (d.isEmpty || !d.label || d.label.length < 3) continue;
       const v = d.value;
-      if (typeof v === 'string' && v.length > 120) continue;
+      if (typeof v === 'string' && v.length > (d.kind === 'textarea' ? 300 : 120)) continue; // le serveur refuse > 300
       const r = AP.resolve(d, ctx);
       if (r && AP.NO_MEMORY.has(r.ruleId)) continue;
       if (r && r.ruleId !== 'memory' && !r.missing && !r.skip) {

@@ -100,7 +100,30 @@ ${
 `;
 }
 
-export function buildAnswersPrompt({ fields, job, profile, cvText, letter, memory, uiLanguage = 'fr' }) {
+/** Section « Réponses mémorisées à adapter » (vide si rien à adapter : le prompt reste identique). */
+function adaptBlock(memoryAnswers) {
+  if (!memoryAnswers?.length) return '';
+  const items = memoryAnswers.map((m) => ({
+    id: m.id,
+    question: m.label,
+    type: m.kind,
+    maxLength: m.maxLength,
+    reponsePrecedente: m.previous?.value,
+    entreprisePrecedente: m.previous?.company || undefined,
+  }));
+  return `
+## Réponses mémorisées à adapter
+Le candidat a déjà répondu à ces questions pour une autre candidature. Pour chacune (même clé "id" dans "answers"), réécris la réponse pour l'offre actuelle.
+- Garde uniquement les faits présents dans le profil ou le CV ; supprime tout fait de la réponse précédente qui n'y figure pas.
+- Remplace toute mention de l'ancienne entreprise ou de l'ancien poste par ceux de l'offre actuelle.
+- Respecte la longueur maximale du champ ("maxLength") si elle est indiquée.
+- N'invente jamais de faits, de chiffres, d'outils ni de dates.
+- Si la réponse ne s'applique plus à cette offre, réponds "value": null avec une "note" qui explique pourquoi.
+${JSON.stringify(items, null, 1)}
+`;
+}
+
+export function buildAnswersPrompt({ fields, job, profile, cvText, letter, memory, memoryAnswers, uiLanguage = 'fr' }) {
   const id = profile.identity || {};
   const name = [id.firstName, id.lastName].filter(Boolean).join(' ') || 'le candidat';
   const memoryItems = Object.values(memory?.items || {})
@@ -127,7 +150,7 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour :
 
 ## Champs à remplir (JSON)
 ${JSON.stringify(fields, null, 1)}
-
+${adaptBlock(memoryAnswers)}
 ## Offre d'emploi
 ${jobBlock(job)}
 

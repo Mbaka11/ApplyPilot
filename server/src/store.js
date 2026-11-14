@@ -145,8 +145,23 @@ export function memoryKey(label) {
   return norm(label).replace(/\s+/g, ' ').slice(0, 200);
 }
 
+/** Réponse longue, champ texte long ou citant l'entreprise d'origine : à adapter plutôt qu'à reprendre telle quelle. */
+export function isAdaptable(item) {
+  if (!item) return false;
+  if (typeof item.adaptable === 'boolean') return item.adaptable;
+  const text = Array.isArray(item.value) ? item.value.join(' ') : item.value;
+  if (typeof text !== 'string') return false;
+  if (text.length > 60 || item.kind === 'textarea') return true;
+  const company = norm(item.lastCompany || '');
+  return company.length >= 2 && ` ${norm(text)} `.includes(` ${company} `);
+}
+
 export function getMemory() {
-  return readJson(MEMORY_FILE(), { items: {} }) || { items: {} };
+  const mem = readJson(MEMORY_FILE(), { items: {} }) || { items: {} };
+  mem.items = mem.items || {};
+  // Anciens fichiers sans le drapeau : calculé à la lecture, rien n'est réécrit.
+  for (const it of Object.values(mem.items)) if (it && typeof it === 'object' && typeof it.adaptable !== 'boolean') it.adaptable = isAdaptable(it);
+  return mem;
 }
 
 export function addToMemory(items = [], source = {}) {
@@ -160,7 +175,7 @@ export function addToMemory(items = [], source = {}) {
     const key = memoryKey(it.label);
     if (!key || key.length < 3) continue;
     const prev = mem.items[key];
-    mem.items[key] = {
+    const entry = {
       label: String(it.label).slice(0, 300),
       value,
       kind: it.kind || prev?.kind || '',
@@ -168,6 +183,8 @@ export function addToMemory(items = [], source = {}) {
       lastUsedAt: now(),
       lastCompany: source.company || prev?.lastCompany || '',
     };
+    entry.adaptable = isAdaptable({ ...entry, adaptable: undefined });
+    mem.items[key] = entry;
     added++;
   }
   writeJson(MEMORY_FILE(), mem);

@@ -56,6 +56,17 @@ if (settings.mode === 'error') {
   output('```json\n{"answers":{}}\n```');
 } else if (settings.mode === 'resultonly') {
   output(JSON.stringify({ answers: {} }), {});
+} else if (input.includes('## Réponses mémorisées à adapter')) {
+  // Adapts remembered answers: swaps the previous company for the new one. Labels steer edge cases.
+  const list = JSON.parse(input.split('## Réponses mémorisées à adapter')[1].match(/\n(\[[\s\S]*?\n\])\n/)[1]);
+  const answers = { ghost: { value: 'Invented by the model', confidence: 1, note: 'never requested' } };
+  for (const m of list) {
+    if (/NULLME/.test(m.question)) answers[m.id] = { value: null, confidence: 0, note: 'Ne s’applique plus' };
+    else if (/LONG/.test(m.question)) answers[m.id] = { value: 'x'.repeat(500), confidence: 0.95, note: 'ignored' };
+    else if (/STALE/.test(m.question)) answers[m.id] = { value: m.reponsePrecedente, confidence: 0.9, note: 'ignored' };
+    else answers[m.id] = { value: m.reponsePrecedente.split(m.entreprisePrecedente).join('Nordic Analytics'), confidence: 0.95, note: 'ignored' };
+  }
+  output({ answers });
 } else if (input.startsWith('Tu adaptes la section')) {
   let delay = 0;
   try { delay = Math.max(0, Math.min(10000, JSON.parse(fs.readFileSync(dir + '-tailor-delay.json', 'utf8')).delay)); } catch { /* no delay */ }

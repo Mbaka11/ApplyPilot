@@ -40,7 +40,7 @@ import {
   saveApplication,
   summary,
 } from './store.js';
-import { detectLanguage, ensureDir, escapeHtml, safeFileName, writeText } from './util.js';
+import { detectLanguage, ensureDir, escapeHtml, norm, safeFileName, writeText } from './util.js';
 
 const require = createRequire(import.meta.url);
 const VERSION = require('../package.json').version;
@@ -622,7 +622,9 @@ route('POST', '/answers', async ({ body, res }) => {
   const cfg = getConfig();
   const profile = getProfile();
   const fields = sanitizeFields(body.fields).filter((f) => f.id && f.label);
-  if (!fields.length) return { answers: {}, ms: 0 };
+  const fieldIds = new Set(fields.map((f) => f.id));
+  const memoryFields = sanitizeMemoryAnswers(body.memoryAnswers).filter((m) => !fieldIds.has(m.id));
+  if (!fields.length && !memoryFields.length) return { answers: {}, memoryAnswers: {}, ms: 0 };
   let app = null;
   if (body.applicationId) {
     try {
@@ -641,6 +643,7 @@ route('POST', '/answers', async ({ body, res }) => {
     cvText: cv ? getCvText(cv) : '',
     letter: app?.letter,
     memory: getMemory(),
+    memoryAnswers: memoryFields,
     uiLanguage: body.uiLanguage,
   });
   // Closing the panel or aborting fetch must also stop the owned pi process.
@@ -655,18 +658,58 @@ route('POST', '/answers', async ({ body, res }) => {
     res.off('close', disconnect);
   }
   const { data, ms } = reply;
-  const ids = new Set(fields.map((f) => f.id));
+  const ids = fieldIds;
+  const memById = new Map(memoryFields.map((m) => [m.id, m]));
   const answers = {};
+  const memoryAnswers = {};
   for (const [id, a] of Object.entries(data?.answers || {})) {
-    if (!ids.has(id) || !a || typeof a !== 'object') continue;
+    if (!a || typeof a !== 'object') continue;
+    const mem = memById.get(id);
+    if (mem) {
+      memoryAnswers[id] = adaptedAnswer(mem, a, job);
+      continue;
+    }
+    if (!ids.has(id)) continue; // jamais de valeur pour un champ non demandé
     answers[id] = {
       value: a.value ?? null,
       confidence: Math.max(0, Math.min(1, Number(a.confidence) || 0)),
       note: String(a.note || '').slice(0, 300),
     };
   }
-  return { answers, ms };
+  return { answers, memoryAnswers, ms };
 });
+
+/** Réponses mémorisées à adapter envoyées par le panneau (même découpage défensif que sanitizeFields). */
+function sanitizeMemoryAnswers(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 40).map((m) => {
+    const prev = m?.previous || {};
+    const value = Array.isArray(prev.value) ? prev.value.join(', ') : prev.value;
+    return {
+      id: String(m?.id || '').slice(0, 80),
+      label: String(m?.label || '').slice(0, 400),
+      kind: String(m?.kind || '').slice(0, 30),
+      maxLength: Number(m?.maxLength) > 0 ? Number(m.maxLength) : undefined,
+      previous: { value: typeof value === 'string' ? value.slice(0, 1500) : '', company: String(prev.company || '').slice(0, 200) },
+    };
+  }).filter((m) => m.id && m.label && m.previous.value);
+}
+
+/** Réponse adaptée : texte seulement, longueur du champ respectée, confiance plafonnée, toujours à relire. */
+function adaptedAnswer(mem, a, job) {
+  const text = typeof a.value === 'string' ? a.value.trim() : '';
+  if (!text) return { value: null, confidence: 0, note: String(a.note || '').slice(0, 300), adapted: true };
+  const value = mem.maxLength && text.length > mem.maxLength ? text.slice(0, mem.maxLength).trim() : text;
+  const old = norm(mem.previous.company);
+  const same = old && norm(job?.company || '') === old;
+  const stale = old.length >= 3 && !same && ` ${norm(value)} `.includes(` ${old} `);
+  const from = mem.previous.company || 'la réponse mémorisée';
+  return {
+    value,
+    confidence: Math.min(0.8, Math.max(0, Number(a.confidence) || 0)),
+    note: stale ? `Adaptée de ${from} : ancienne entreprise encore mentionnée` : `Adaptée de ${from}`,
+    adapted: true,
+  };
+}
 
 route('GET', '/memory', () => getMemory());
 
