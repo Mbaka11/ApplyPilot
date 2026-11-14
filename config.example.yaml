@@ -55,6 +55,11 @@ llm:
     letterThinking: medium # Requested: off | minimal | low | medium | high | xhigh | max. Effective level is not reported.
     answersThinking: low
 
+# Local AI usage log (data/usage/usage.jsonl): date, task, model, duration, tokens and cost only.
+# Never stores prompts, answers, company names or profile data. Kept 180 days, 5 MB max.
+usage:
+  enabled: true
+
 chrome:
   executablePath: "" # Blank = auto-detect Chrome, then Edge.
 

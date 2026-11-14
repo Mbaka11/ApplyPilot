@@ -16,6 +16,7 @@ import {
 import { getCvText, listCvs, publicCv, recommendCv } from './cvs.js';
 import { cvFileActions } from './cv-files.js';
 import { TailorError, findLatex, sha256, tailorCv } from './cv-tailor.js';
+import { clearUsage, usageView } from './usage.js';
 import { askJson, cancelAll, resolvePi, generationSettings, llmHealth, providerSummary } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
@@ -716,6 +717,10 @@ route('GET', '/memory', () => getMemory());
 route('POST', '/memory', ({ body }) => addToMemory(Array.isArray(body.items) ? body.items.slice(0, 200) : [], { company: body.company }));
 
 route('DELETE', '/memory/:key', ({ params }) => deleteFromMemory(decodeURIComponent(params.key)));
+
+// --- AI usage log (counts and tokens only, never content) ---
+route('GET', '/usage', ({ query }) => usageView(query, getConfig()));
+route('DELETE', '/usage', () => clearUsage());
 
 route('GET', '/journal.csv', ({ res }) => {
   res.writeHead(200, {

@@ -29,6 +29,7 @@ export const DEFAULTS = {
     provider: '', // vide = pi si des réglages pi sont présents, sinon claude si le binaire est trouvé, sinon pi
     timeoutSeconds: 300,
   },
+  usage: { enabled: true }, // AI usage log (counts and tokens only, never content)
   chrome: { executablePath: '' },
   letter: {
     paper: 'Letter',

@@ -2,6 +2,7 @@ import { normalizeLlm } from './config.js';
 import { cancelAll, killTree } from './llm/common.js';
 import * as pi from './llm/pi.js';
 import * as claude from './llm/claude.js';
+import { billingMode, recordUsage } from './usage.js';
 
 export { killTree, cancelAll };
 export const cancelAllPi = cancelAll; // ancien nom
@@ -74,19 +75,46 @@ export function extractJson(text) {
 const parsed = r => (r.data !== undefined ? r.data : extractJson(r.text));
 const addCost = (a, b) => (a == null && b == null ? undefined : (a || 0) + (b || 0));
 
+const addTokens = (a, b) => (a == null && b == null ? null : (a || 0) + (b || 0));
+
+/** Usage log (counters only, never content). Never throws and never slows the generation down. */
+function logUsage(opts, started, runs, ok, attempts) {
+  try {
+    const cfg = opts.cfg || {};
+    if (cfg.usage?.enabled === false) return;
+    const provider = resolveProvider(cfg), task = opts.task || 'letter';
+    let requested = {};
+    try { const g = generationSettings(cfg, provider); requested = g[task] || g.letter || {}; } catch { /* unreadable settings */ }
+    const gen = [...runs].reverse().find(r => r?.generation)?.generation || {};
+    const sum = key => runs.reduce((t, r) => addTokens(t, r?.usage?.[key]), null);
+    recordUsage({ at: new Date().toISOString(), task, provider, model: gen.model || opts.model || requested.requestedModel, effort: opts.effort || opts.thinking || requested.requestedThinking,
+      ms: ok ? runs.reduce((t, r) => t + (r?.ms || 0), 0) : Date.now() - started, attempts, ok,
+      costUsd: runs.reduce((t, r) => addCost(t, r?.generation?.costUsd), undefined) ?? null, inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'), billing: billingMode() });
+  } catch { /* the log must never break a generation */ }
+}
+
 /** Appelle le fournisseur et parse le JSON (`structured_output` si présent) ; un second essai est fait si ce n'est pas du JSON valide. */
 export async function askJson(prompt, opts = {}) {
-  const first = await runProvider(prompt, opts);
+  const started = Date.now(), runs = [];
+  const call = async text => {
+    try { const r = await runProvider(text, opts); runs.push(r); return r; }
+    catch (e) { if (e?.name !== 'AbortError') logUsage(opts, started, runs, false, runs.length + 1); throw e; } // a cancellation is not a failure
+  };
+  const first = await call(prompt);
   try {
-    return { data: parsed(first), ms: first.ms, runner: first.runner, generation: first.generation };
+    const data = parsed(first);
+    logUsage(opts, started, runs, true, 1);
+    return { data, ms: first.ms, runner: first.runner, generation: first.generation };
   } catch {
-    const retry = await runProvider(
+    const retry = await call(
       `${prompt}\n\nIMPORTANT : ta réponse précédente n'était pas un JSON valide. Réponds UNIQUEMENT avec l'objet JSON, sans aucun texte autour.`,
-      opts,
     );
     const generation = { ...retry.generation, attempts: 2 };
     const cost = addCost(first.generation?.costUsd, retry.generation?.costUsd);
     if (cost !== undefined) generation.costUsd = cost;
-    return { data: parsed(retry), ms: first.ms + retry.ms, runner: retry.runner, generation };
+    let data;
+    try { data = parsed(retry); } catch (e) { logUsage(opts, started, runs, false, 2); throw e; }
+    logUsage(opts, started, runs, true, 2);
+    return { data, ms: first.ms + retry.ms, runner: retry.runner, generation };
   }
 }

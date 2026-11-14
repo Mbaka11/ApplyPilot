@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node ../tests/version.test.mjs && node ../tests/i18n.test.mjs && node ../tests/memory-adapt.test.mjs && node ../tests/llm.test.mjs && node --test ../tests/cv-files.test.mjs ../tests/cv-inspector.test.mjs ../tests/form-diagnostic.test.mjs ../tests/successfactors.test.mjs ../tests/successfactors-documents.test.mjs ../tests/cv-tailor.test.mjs && node --test ../tests/search.test.mjs ../tests/search-sort.test.mjs ../tests/stats.test.mjs ../tests/search-browser.test.mjs ../tests/linkedin.test.mjs && node ../tests/server.test.mjs && node ../tests/cv-tailor-server.mjs && node ../tests/content.test.mjs && node ../tests/e2e.test.mjs",
+    "test": "node ../tests/version.test.mjs && node ../tests/i18n.test.mjs && node ../tests/memory-adapt.test.mjs && node ../tests/llm.test.mjs && node ../tests/usage.test.mjs && node --test ../tests/cv-files.test.mjs ../tests/cv-inspector.test.mjs ../tests/form-diagnostic.test.mjs ../tests/successfactors.test.mjs ../tests/successfactors-documents.test.mjs ../tests/cv-tailor.test.mjs && node --test ../tests/search.test.mjs ../tests/search-sort.test.mjs ../tests/stats.test.mjs ../tests/search-browser.test.mjs ../tests/linkedin.test.mjs && node ../tests/server.test.mjs && node ../tests/cv-tailor-server.mjs && node ../tests/content.test.mjs && node ../tests/e2e.test.mjs",
     "test:version": "node ../tests/version.test.mjs",
     "test:i18n": "node ../tests/i18n.test.mjs",
     "test:llm": "node ../tests/llm.test.mjs",

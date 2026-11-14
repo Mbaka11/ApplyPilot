@@ -118,7 +118,10 @@ export function run(prompt, { cfg, task = 'letter', schema, model, effort, timeo
       const usage = out.modelUsage && typeof out.modelUsage === 'object' ? out.modelUsage : {};
       const observed = identifier(Object.keys(usage).sort((a, b) => (usage[b]?.outputTokens || 0) - (usage[a]?.outputTokens || 0))[0]);
       const costUsd = Number.isFinite(out.total_cost_usd) ? out.total_cost_usd : null;
-      finish(resolve, { text, data, ms: Date.now() - started, runner: runner.desc, generation: { schema: 1, providerKind: 'claude-cli', ...requested,
+      // Provider-neutral token counts (input = input + cache write + cache read); never any content.
+      const u = out.usage && typeof out.usage === 'object' ? out.usage : null, n = v => (Number.isFinite(v) && v >= 0 ? v : 0);
+      const tokens = u ? { inputTokens: n(u.input_tokens) + n(u.cache_creation_input_tokens) + n(u.cache_read_input_tokens), outputTokens: n(u.output_tokens) } : { inputTokens: null, outputTokens: null };
+      finish(resolve, { text, data, ms: Date.now() - started, runner: runner.desc, usage: tokens, generation: { schema: 1, providerKind: 'claude-cli', ...requested,
         observedThinking: null, provider: 'anthropic', model: observed, costUsd, attribution: observed ? 'claude-cli-result' : 'unknown', attempts: 1 } });
     });
     child.stdin.on('error', () => {});
