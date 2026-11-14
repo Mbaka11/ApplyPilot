@@ -53,3 +53,13 @@ test('location filter groups saved listings by Montréal, Toronto, Canada, Unite
   assert.equal(ids('unknown'), 'e');
   assert.deepEqual(jobLocations({ location: 'Montréal (hybride)' }).sort(), ['canada', 'montreal', 'remote']);
 });
+
+test('since filter keeps only jobs first seen strictly after it, is pure, and ignores bad values', () => {
+  const rows = ['2026-01-01T00:00:00.000Z', '2026-02-01T00:00:00.000Z', 'bad', undefined].map((firstSeenAt, i) => ({ id: String(i), firstSeenAt, url: 'https://boards.greenhouse.io/acme/jobs/1001', status: 'new' }));
+  const before = JSON.stringify(rows);
+  assert.deepEqual(filterCatalog(rows, { since: '2026-01-01T00:00:00.000Z' }).map(r => r.id), ['1']);
+  assert.deepEqual(filterCatalog(rows, { since: '2025-01-01T00:00:00.000Z' }).map(r => r.id), ['0', '1']);
+  assert.equal(filterCatalog(rows, { since: 'garbage' }).length, 4);
+  assert.equal(filterCatalog(rows, {}).length, 4);
+  assert.equal(JSON.stringify(rows), before);
+});

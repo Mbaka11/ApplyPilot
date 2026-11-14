@@ -10,7 +10,7 @@ const OUT = path.join(ROOT, 'tests/output/search-unit');
 fs.mkdirSync(OUT, { recursive: true });
 const DATA = fs.mkdtempSync(path.join(OUT, 'catalog-'));
 process.env.APPLYPILOT_DATA_DIR = DATA;
-const { getSearch, addDiscoveries, importDiscoveries, saveSearchSettings, updateDiscovery, deleteDiscovery, clearDiscoveries } = await import('../server/src/search.js');
+const { getSearch, markSearchSeen, addDiscoveries, importDiscoveries, saveSearchSettings, updateDiscovery, deleteDiscovery, clearDiscoveries } = await import('../server/src/search.js');
 const file = path.join(DATA, 'search/discovery.json');
 const defaults = searchDefaults({ availability: { termEn: 'Winter 2027' } });
 const employer = 'https://careers.example.org/jobs/software-intern';
@@ -220,4 +220,56 @@ test('catalog capacity is enforced atomically but rediscovery of existing jobs s
   assert.equal(fs.readFileSync(file, 'utf8'), before);
   assert.equal(addDiscoveries([{ ...sample, url: employer + '/0' }]).updated, 1);
   assert.equal(getSearch().jobs.length, 3000);
+});
+
+// --- 0.9.0 new-offer meta (data/search/meta.json) ---
+const metaFile = path.join(DATA, 'search/meta.json');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+test('first read initialises lastSeenAt so the existing catalog is not flagged new', () => {
+  reset();
+  assert.equal(getSearch().meta.newCount, 0);
+  const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+  assert.ok(Number.isFinite(Date.parse(meta.lastSeenAt)));
+  assert.equal(meta.lastRunAt, null);
+  assert.equal(meta.lastRun, null);
+});
+test('a batch updates lastRunAt/lastRun, counts as new until seen, and leaves discovery.json free of meta', async () => {
+  reset(); saveSearchSettings(defaults);
+  getSearch();
+  await sleep(5);
+  addDiscoveries([sample], { source: 'google' });
+  let view = getSearch();
+  assert.equal(view.meta.lastRun.source, 'google');
+  assert.equal(view.meta.lastRun.scope, defaults.scope);
+  assert.ok(view.meta.lastRunAt);
+  assert.equal(view.meta.newCount, 1);
+  const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal('lastRunAt' in stored || 'lastSeenAt' in stored || 'meta' in stored, false);
+  await sleep(5);
+  markSearchSeen();
+  assert.equal(getSearch().meta.newCount, 0);
+  await sleep(5);
+  addDiscoveries([{ ...sample, url: employer + '-2' }], { source: 'linkedin-public', scope: 'canada' });
+  view = getSearch();
+  assert.equal(view.meta.newCount, 1);
+  assert.deepEqual(view.meta.lastRun, { source: 'linkedin-public', scope: 'canada' });
+  updateDiscovery(view.jobs.find(j => j.url.endsWith('-2')).id, { status: 'saved' });
+  assert.equal(getSearch().meta.newCount, 0);
+});
+test('the very first batch without any meta is still new; corrupt meta restarts safely; import records its source', () => {
+  reset();
+  addDiscoveries([sample]);
+  assert.equal(getSearch().meta.newCount, 1);
+  assert.equal(getSearch().meta.lastRun.source, 'google');
+  fs.writeFileSync(metaFile, '{not json');
+  assert.equal(getSearch().meta.newCount, 0);
+  assert.ok(Number.isFinite(Date.parse(JSON.parse(fs.readFileSync(metaFile, 'utf8')).lastSeenAt)));
+  importDiscoveries({ links: employer + '-3' });
+  assert.equal(getSearch().meta.lastRun.source, 'manual');
+});
+test('meta writes are atomic (no temp file left, valid JSON after many runs)', () => {
+  reset();
+  for (let i = 0; i < 20; i++) { addDiscoveries([{ ...sample, url: `${employer}-${i}` }]); markSearchSeen(); }
+  assert.ok(JSON.parse(fs.readFileSync(metaFile, 'utf8')).lastSeenAt);
+  assert.deepEqual(fs.readdirSync(path.dirname(metaFile)).filter(n => n.endsWith('.tmp')), []);
 });

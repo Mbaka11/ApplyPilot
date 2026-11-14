@@ -46,6 +46,27 @@ function read() {
   } catch { fail(409, 'Le catalogue de recherche est illisible. Il n’a pas été écrasé.'); }
   return state;
 }
+const metaFile = () => path.join(DATA_DIR, 'search', 'meta.json');
+const metaDate = v => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v : null);
+/** Run/seen markers live apart from discovery.json (strict validation). Corrupt or missing = start again, never fatal. */
+function readMeta(initAt = now()) {
+  let raw = null;
+  try { raw = JSON.parse(fs.readFileSync(metaFile(), 'utf8')); } catch { /* absent or corrupt */ }
+  const ok = !!(raw && typeof raw === 'object' && !Array.isArray(raw) && metaDate(raw.lastSeenAt));
+  const run = raw?.lastRun && typeof raw.lastRun === 'object' ? raw.lastRun : null;
+  const meta = {
+    lastRunAt: metaDate(raw?.lastRunAt), lastSeenAt: ok ? raw.lastSeenAt : initAt,
+    lastRun: run && typeof run.source === 'string' ? { source: run.source.slice(0, 40), scope: typeof run.scope === 'string' ? run.scope.slice(0, 40) : '' } : null,
+  };
+  if (!ok) { try { writeJson(metaFile(), meta); } catch { /* read-only data dir: still serve the view */ } } // first run: nothing existing counts as new
+  return meta;
+}
+export function markSearchSeen() {
+  const meta = readMeta();
+  meta.lastSeenAt = now();
+  writeJson(metaFile(), meta);
+  return meta;
+}
 function write(state) {
   const next = { ...state, schema: 2 };
   if (Buffer.byteLength(JSON.stringify(next, null, 2)) > MAX_BYTES) fail(400, 'Le catalogue de recherche est trop volumineux. Supprime des offres.');
@@ -81,7 +102,9 @@ export function getSearch(profile = {}, applications = []) {
   }
   const jobs = state.jobs.map(job => ({ ...job, ...catalogMeta(job), ...rankOffer(job, settings), ...(job.keys.map(key => appKeys.get(key)).find(Boolean) || {}) }));
   jobs.sort((a, b) => b.score - a.score || b.lastSeenAt.localeCompare(a.lastSeenAt));
-  return { settings, jobs };
+  const meta = readMeta();
+  meta.newCount = state.jobs.filter(job => job.status === 'new' && job.firstSeenAt > meta.lastSeenAt).length;
+  return { settings, jobs, meta };
 }
 export function saveSearchSettings(input, profile = {}) {
   const state = read();
@@ -102,9 +125,10 @@ function merge(target, incoming) {
   if (incoming.employerUrl) target.employerUrl = incoming.employerUrl;
   if (incoming.postedAt) target.postedAt = incoming.postedAt;
 }
-export function addDiscoveries(items) {
+export function addDiscoveries(items, run = {}) {
   if (!Array.isArray(items) || !items.length || items.length > 100) fail(400, 'Ajoute entre 1 et 100 offres à la fois.');
   const incoming = items.map(record), state = read(); // validate whole batch; only one final atomic write
+  const before = new Date(Date.now() - 1).toISOString(); // a first-ever meta must not hide this batch's own offers
   let added = 0, updated = 0, merged = 0;
   for (const item of incoming) {
     const keys = new Set(item.keys), matches = new Set();
@@ -139,6 +163,11 @@ export function addDiscoveries(items) {
     }
   }
   write(state);
+  const meta = readMeta(before);
+  const scope = typeof run.scope === 'string' && /^[a-z_]{1,40}$/.test(run.scope) ? run.scope : (state.settings?.scope || '');
+  meta.lastRunAt = now();
+  meta.lastRun = { source: SOURCES.includes(run.source) ? run.source : incoming[0].sources[0], scope };
+  writeJson(metaFile(), meta);
   return { added, updated, merged };
 }
 export function importDiscoveries(body) {

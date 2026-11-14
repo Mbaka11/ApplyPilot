@@ -19,8 +19,9 @@ import { TailorError, findLatex, sha256, tailorCv } from './cv-tailor.js';
 import { askJson, cancelAll, resolvePi, generationSettings, llmHealth, providerSummary } from './llm.js';
 import { translate } from '../../extension/sidepanel/i18n.mjs';
 import { editableProfile, updateProfile } from './profile.js';
-import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, updateDiscovery, deleteDiscovery, clearDiscoveries } from './search.js';
+import { getSearch, saveSearchSettings, addDiscoveries, importDiscoveries, markSearchSeen, updateDiscovery, deleteDiscovery, clearDiscoveries } from './search.js';
 import { searchLinkedInPage } from './linkedin.js';
+import { computeStats } from './stats.js';
 import { detectRequirements, transcriptPath } from './requirements.js';
 import { letterFileName, letterPlainText, renderLetterHtml } from './letter.js';
 import { closeBrowser, findChrome, htmlToPdf } from './pdf.js';
@@ -329,8 +330,14 @@ route('PUT', '/search/settings', ({ body }) => {
 });
 route('POST', '/search/results', ({ body }) => {
   if (!Array.isArray(body?.items) || !body.items.length || body.items.length > 100) throw new HttpError(400, 'Ajoute entre 1 et 100 offres à la fois.');
-  const counts = addDiscoveries(body.items.map(item => ({ ...item, source: 'google', employerUrl: '' })));
+  const counts = addDiscoveries(body.items.map(item => ({ ...item, source: 'google', employerUrl: '' })), { source: 'google' });
   return { ...discoveryView(), ...counts };
+});
+route('POST', '/search/seen', () => { markSearchSeen(); return discoveryView(); });
+route('GET', '/stats', () => {
+  let jobs = [];
+  try { jobs = getSearch({}, []).jobs; } catch { /* unreadable catalog: stats still work from applications */ }
+  return computeStats(listApplications(), jobs);
 });
 route('POST', '/search/import', ({ body }) => ({ ...importDiscoveries(body), ...discoveryView() }));
 route('POST', '/search/linkedin', async ({ body, res }) => {
@@ -340,7 +347,7 @@ route('POST', '/search/linkedin', async ({ body, res }) => {
   try {
     const result = await searchLinkedInPage({ settings: body?.settings, index: body?.index, acknowledgeExperimental: body?.acknowledgeExperimental === true, signal: controller.signal });
     if (controller.signal.aborted || res.destroyed) return undefined;
-    const counts = result.items.length ? addDiscoveries(result.items) : { added: 0, updated: 0, merged: 0 };
+    const counts = result.items.length ? addDiscoveries(result.items, { source: 'linkedin-public', scope: body?.settings?.scope }) : { added: 0, updated: 0, merged: 0 };
     return { ...discoveryView(), ...counts, received: result.items.length, evidence: result.evidence, truncated: result.truncated };
   } finally { res.removeListener('close', disconnect); }
 });

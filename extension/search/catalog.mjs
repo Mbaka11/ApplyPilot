@@ -62,10 +62,11 @@ export function jobLocations(job) {
   if (found.includes('montreal') || found.includes('toronto')) found.push('canada');
   return found.length ? [...new Set(found)] : ['unknown'];
 }
-export function filterCatalog(jobs, { status = 'visible', kind = 'job', platform = 'all', source = 'all', text = '', location = 'all' } = {}) {
-  const needle = normal(text);
+export function filterCatalog(jobs, { status = 'visible', kind = 'job', platform = 'all', source = 'all', text = '', location = 'all', since = '' } = {}) {
+  const needle = normal(text), sinceTime = typeof since === 'string' && since ? Date.parse(since) : NaN;
   return jobs.filter(job => {
     const meta = catalogMeta(job);
+    if (Number.isFinite(sinceTime) && !(Date.parse(job.firstSeenAt) > sinceTime)) return false; // only jobs first seen after `since`
     return (status === 'all' || (status === 'visible' ? job.status !== 'hidden' : job.status === status)) &&
       (kind === 'all' || meta.kind === kind) && (platform === 'all' || meta.platforms.includes(platform)) &&
       (source === 'all' || meta.discoveryMethods.includes(source)) && (location === 'all' || jobLocations(job).includes(location)) && (!needle || normal(`${job.title} ${job.company} ${job.location}`).includes(needle));
